@@ -1,0 +1,5 @@
+(sym_lib_table
+  (lib (name "receiver")(type "Legacy")(uri "${KIPRJMOD}/BalanceBoard.lib")(options "")(descr ""))
+  (lib (name "power")(type "Legacy")(uri "${KIPRJMOD}/power.lib")(options "")(descr ""))
+  (lib (name "BalanceBoard-rescue")(type "Legacy")(uri "${KIPRJMOD}/BalanceBoard-rescue.lib")(options "")(descr ""))
+)
