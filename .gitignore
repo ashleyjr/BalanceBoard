@@ -22,3 +22,6 @@ fp-info-cache
 
 # Netlist files (exported from Eeschema)
 *.net
+
+# Backups
+hardware/rev_a/BalanceBoard/BalanceBoard-backups/*
