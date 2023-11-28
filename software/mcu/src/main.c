@@ -9,7 +9,7 @@
 // Defines
 //-----------------------------------------------------------------------------
 
-#define SMB_TARGET   0x96 // SMB target address of IMU
+#define SMB_TARGET   0xD0 // SMB target address of IMU
 #define SMB_MTSTA    0xE0 // (MT) start transmitted
 #define SMB_MTDB     0xC0 // (MT) data byte transmitted
 #define SMB_MRDB     0x80 // (MR) data byte received
@@ -19,9 +19,10 @@
 //-----------------------------------------------------------------------------
 
 volatile U8 smb_data_in;              // Global holder for SMBus data.
-volatile U8 smb_data_out;             // Global holder for SMBus data.
+volatile U8 smb_data_out [2];         // Global holder for SMBus data.
 volatile U8 smb_busy;                 // Software flag to indicate when the
 volatile U8 smb_rw;                   // Software flag to indicate the
+volatile U8 smb_ptr;
 
 //-----------------------------------------------------------------------------
 // Prototypes
@@ -29,8 +30,8 @@ volatile U8 smb_rw;                   // Software flag to indicate the
 
 void uartTx(U8 tx);
 void setup(void);
-void smbRead(void);
-void smbWrite(U8 data);
+U8 smbRead(U8 addr);
+void smbWrite(U8 addr, U8 data);
 
 //-----------------------------------------------------------------------------
 // Main Routine
@@ -38,8 +39,10 @@ void smbWrite(U8 data);
 
 void main (void){          
    setup();  
-   smbWrite(0x0);
+   
+   smbWrite(0xAA, 0x0);
    for(;;){
+
    };
 }
  
@@ -60,26 +63,25 @@ INTERRUPT (TIMER2_ISR, TIMER2_IRQn){
 //-----------------------------------------------------------------------------
 
 INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){ 
-   static U8 ADDR_SEND = 0;   // Used by the ISR to flag byte transmissions as slave addresses 
    switch (SMB0CN & 0xF0) {
       // Master Transmitter/Receiver: START condition transmitted.
       case SMB_MTSTA:   SMB0DAT = SMB_TARGET;            // Load address of the target slave (only one)
                         SMB0DAT &= 0xFE;                 // Clear the LSB of the address for the 
                         SMB0DAT |= smb_rw;               // Load R/W bit
                         SMB0CN_STA = 0;                  // Manually clear START bit
-                        ADDR_SEND = 1;
+                        smb_ptr = 0;
                         break;
       // Master Transmitter: Data byte transmitted only writes
       case SMB_MTDB:    if(SMB0CN_ACK) {
-                           if (ADDR_SEND) {              // address,
-                              ADDR_SEND = 0;             // Next byte is not a slave address
-                              SMB0DAT = smb_data_out;
-                           }else{                        // address,
-                              SMB0CN_STO = 1;            // Set SMB0CN_STO to terminate transfer
-                              smb_busy = 0;              // And free SMBus interface
-                           }
-                              
+                           if(smb_ptr == 2){
+                              SMB0CN_STO = 1;   
+                              smb_busy = 0;     
+                           } else {
+                              SMB0DAT = smb_data_out[smb_ptr]; 
+                              smb_ptr++;
+                           } 
                         } else {
+                           // Transmission failed
                            SMB0CN_STO = 1;               // Send STOP condition,followed
                            SMB0CN_STA = 1;               // By a START 
                         }
@@ -96,7 +98,7 @@ INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){
    SMB0CN_SI = 0; //Clear interrupt flag 
 }
 
-void SMB_Read (void){
+U8 smbRead (U8 addr){
    while (smb_busy);       // Wait for bus to be free.
    smb_busy = 1;           // Claim SMBus (set to busy)
    smb_rw = 1;             // Mark this transfer as a READ 
@@ -104,9 +106,10 @@ void SMB_Read (void){
    while (smb_busy);       // Wait for transfer to complete
 }
 
-void smbWrite (U8 data){
+void smbWrite (U8 addr, U8 data){
    while(smb_busy);
-   smb_data_out = data;
+   smb_data_out[0] = addr;
+   smb_data_out[1] = data;
    smb_busy = 1;           // Claim SMBus (set to busy)  
    smb_rw = 0;             // Mark this transfer as a WRITE
    SMB0CN_STA = 1;         // Start transfer 
@@ -168,7 +171,7 @@ void setup(void){
               TMOD_T1M__MODE2;
 	TCON     = TCON_TR0__RUN |
               TCON_TR1__RUN; 
-   TH0      = 0xC0;           // I2C SCL - 333KHz (above 100KHz max for drivers datasheet)
+   TH0      = 0x40;           // I2C SCL - 333KHz (above 100KHz max for drivers datasheet)
    TL0      = 0x00;
    TH1      = 0x96;           // Magic values from datasheet for 115200
 	TL1      = 0x96; 
@@ -185,6 +188,8 @@ void setup(void){
               SMB0CF_SMBCS__TIMER0|
               SMB0CF_SMBFTE__FREE_TO_ENABLED| 
               SMB0CF_ENSMB__ENABLED; 
+
+   SMB0TC   = SMB0TC_SDD__ADD_8_SYSCLKS;
 
    // Interrupts
    IE       = IE_EA__ENABLED | 
