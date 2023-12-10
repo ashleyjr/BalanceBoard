@@ -5,6 +5,7 @@ import sys
 import argparse
 import logging
 import threading
+import time
 
 def main():
 
@@ -14,9 +15,9 @@ def main():
         ser.flushOutput()
         ser.reset_input_buffer()
         while True:
-            if ser.in_waiting >= 0:
-                print(ser.read(1).decode("utf-8"))
-
+            if ser.inWaiting() > 0:
+                print(ser.read(ser.inWaiting()).decode("utf-8"))
+            time.sleep(1)
 
 
 if __name__ == "__main__":

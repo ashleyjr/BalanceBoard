@@ -14,6 +14,14 @@
 #define SMB_MTDB     0xC0 // (MT) data byte transmitted
 #define SMB_MRDB     0x80 // (MR) data byte received
 
+#define SMB_STATE_RD1      0x04
+#define SMB_STATE_RD_STOP  0x03
+#define SMB_STATE_WR2      0x02
+#define SMB_STATE_WR1      0x01
+#define SMB_STATE_WR_STOP  0x00
+
+
+
 //-----------------------------------------------------------------------------
 // Global Variables
 //-----------------------------------------------------------------------------
@@ -21,8 +29,10 @@
 volatile U8 smb_data_in;              // Global holder for SMBus data.
 volatile U8 smb_data_out [2];         // Global holder for SMBus data.
 volatile U8 smb_busy;                 // Software flag to indicate when the
-volatile U8 smb_rw;                   // Software flag to indicate the
+volatile U8 smb_rnw;                   // Software flag to indicate the
 volatile U8 smb_ptr;
+
+volatile U8 mpu_state;
 
 //-----------------------------------------------------------------------------
 // Prototypes
@@ -38,9 +48,19 @@ void smbWrite(U8 addr, U8 data);
 //-----------------------------------------------------------------------------
 
 void main (void){          
+   U8 i;
    setup();  
    
    smbWrite(0xAA, 0x0);
+   
+   i = smbRead(0x75);
+   
+   uartTx('0');
+   uartTx('x');
+   uartTx((i >> 4) + '0');
+   uartTx((i & 0xF) + '0');
+   
+
    for(;;){
 
    };
@@ -67,19 +87,27 @@ INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){
       // Master Transmitter/Receiver: START condition transmitted.
       case SMB_MTSTA:   SMB0DAT = SMB_TARGET;            // Load address of the target slave (only one)
                         SMB0DAT &= 0xFE;                 // Clear the LSB of the address for the 
-                        SMB0DAT |= smb_rw;               // Load R/W bit
-                        SMB0CN_STA = 0;                  // Manually clear START bit
-                        smb_ptr = 0;
+                        SMB0DAT |= smb_rnw;               // Load R/W bit
+                        SMB0CN_STA = 0;                  // Manually clear START bit 
                         break;
       // Master Transmitter: Data byte transmitted only writes
       case SMB_MTDB:    if(SMB0CN_ACK) {
-                           if(smb_ptr == 2){
-                              SMB0CN_STO = 1;   
-                              smb_busy = 0;     
-                           } else {
-                              SMB0DAT = smb_data_out[smb_ptr]; 
-                              smb_ptr++;
-                           } 
+                           switch(mpu_state){ 
+                              case SMB_STATE_RD1:        mpu_state = SMB_STATE_RD_STOP;
+                                                         break;
+                              case SMB_STATE_RD_STOP:    SMB0CN_STO = 1;   
+                                                         break; 
+                              case SMB_STATE_WR2:        SMB0DAT = smb_data_out[1]; 
+                                                         mpu_state = SMB_STATE_WR1;
+                                                         break;
+                              case SMB_STATE_WR1:        SMB0DAT = smb_data_out[0]; 
+                                                         mpu_state = SMB_STATE_WR_STOP;
+                                                         break;
+                              case SMB_STATE_WR_STOP:    SMB0CN_STO = 1;   
+                                                         smb_busy = 0;     
+                              default:                   break;
+                           }
+
                         } else {
                            // Transmission failed
                            SMB0CN_STO = 1;               // Send STOP condition,followed
@@ -99,20 +127,29 @@ INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){
 }
 
 U8 smbRead (U8 addr){
-   while (smb_busy);       // Wait for bus to be free.
-   smb_busy = 1;           // Claim SMBus (set to busy)
-   smb_rw = 1;             // Mark this transfer as a READ 
-   SMB0CN_STA = 1;
-   while (smb_busy);       // Wait for transfer to complete
+   while (smb_busy);          // Wait for bus to be free.
+   mpu_state = SMB_STATE_WR1;
+   smb_data_out[0] = addr;
+   smb_busy = 1;              // Claim SMBus (set to busy)  
+   smb_rnw = 0;               // Mark this transfer as a WRITE
+   SMB0CN_STA = 1;            // Start transfer 
+   while (smb_busy);          // Wait for bus to be free.
+   mpu_state = SMB_STATE_RD1; 
+   smb_busy = 1;              // Claim SMBus (set to busy)  
+   smb_rnw = 1;               // Mark this transfer as a WRITE
+   SMB0CN_STA = 1;            // Start transfer 
+   while (smb_busy);
+   return smb_data_in;
 }
 
 void smbWrite (U8 addr, U8 data){
    while(smb_busy);
-   smb_data_out[0] = addr;
-   smb_data_out[1] = data;
-   smb_busy = 1;           // Claim SMBus (set to busy)  
-   smb_rw = 0;             // Mark this transfer as a WRITE
-   SMB0CN_STA = 1;         // Start transfer 
+   mpu_state = SMB_STATE_WR2;
+   smb_data_out[1] = addr;
+   smb_data_out[0] = data;
+   smb_busy = 1;              // Claim SMBus (set to busy)  
+   smb_rnw = 0;               // Mark this transfer as a WRITE
+   SMB0CN_STA = 1;            // Start transfer 
 }
 
 //-----------------------------------------------------------------------------
