@@ -14,9 +14,11 @@ def main():
         ser.flushInput()
         ser.flushOutput()
         ser.reset_input_buffer()
+
         while True:
             if ser.inWaiting() > 0:
-                print(ser.read(ser.inWaiting()).decode("utf-8"))
+                print(ser.read(ser.inWaiting()).decode("utf-8"), end='')
+                ser.write("a".encode("utf-8"))
             time.sleep(1)
 
 
