@@ -1,8 +1,12 @@
 import matplotlib
-matplotlib.use('GTK3Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
-
+import multiprocessing
+import threading
+import sys
+import serial
+import time
 
 MPU_SAMPLE_PERIOD_S = 5e-3
 MPU_FS_SEL = 500
@@ -18,13 +22,32 @@ class Analysis:
         self.last = 0
         self.laps = 0
 
+        self.log = ""
+
+    def read(self, filename):
         # Read in logfile
         f = open(filename,"r+")
-        logfile= f.read()
+        self.logfile= f.read()
         f.close()
 
+    def proc(self):
         # Get the data
-        self.__procLog(logfile)
+        self.__procLog(self.logfile)
+
+    def log(self):
+
+        with serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1) as ser:
+            ser.flush()
+            ser.flushInput()
+            ser.flushOutput()
+            ser.reset_input_buffer()
+
+            while True:
+                if ser.inWaiting() > 0:
+                    print('a')
+                    self.log += ser.read(ser.inWaiting()).decode("utf-8")
+                    ser.write("a".encode("utf-8"))
+                time.sleep(0.1)
 
     def __procLog(self, log):
         self.__time = []
@@ -35,7 +58,7 @@ class Analysis:
         self.__gyro_y = []
         self.__gyro_z = []
         self.__motor = []
-        lines = log.split("\n")[:-1]
+        lines = log.split("\n")[1:-1]
         for line in lines:
             self.__time.append(self.__procLineTime(line))
             self.__accel_x.append(self.__procLineAccelX(line))
@@ -103,7 +126,7 @@ class Analysis:
         ax[1].plot(self.__time, self.__gyro_x, label="x")
         ax[1].plot(self.__time, self.__gyro_y, label="y")
         ax[1].plot(self.__time, self.__gyro_z, label="z")
-        ax[2].plot(self.__time, self.__motor)
+        ax[2].plot(self.__time, self.__motor, label="Motor")
         for i in range(3):
             ax[i].grid(True, which='major')
             ax[i].grid(True, which='minor')
@@ -118,12 +141,41 @@ class Analysis:
         ax[2].set_ylim([-MOTOR_DRV, MOTOR_DRV])
         plt.savefig("graph.png", dpi=200)
 
+
+def log(arg, filename):
+    t = threading.currentThread()
+    with serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1) as ser:
+        ser.flush()
+        ser.flushInput()
+        ser.flushOutput()
+        ser.reset_input_buffer()
+
+        f = open(filename, "w+")
+
+        while getattr(t, "do_run", True):
+            if ser.inWaiting() > 0:
+                f.write(ser.read(ser.inWaiting()).decode("utf-8"))
+                ser.write("a".encode("utf-8"))
+            time.sleep(0.1)
+
+        f.close()
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--filename", type=str, required=True)
     args = parser.parse_args()
 
+    print("Capturing...")
+    t = threading.Thread(target=log, args=("task",args.filename,))
+    t.start()
+    sys.stdin.read(1)
+    t.do_run = False
+    t.join()
+
+    print("Plotting...")
     u = Analysis(args.filename)
+    u.read(args.filename)
+    u.proc()
     u.plotAll()
 
 if "__main__" == __name__:
