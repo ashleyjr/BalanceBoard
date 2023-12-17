@@ -49,6 +49,21 @@ class Analysis:
                     ser.write("a".encode("utf-8"))
                 time.sleep(0.1)
 
+    def elapsed(self):
+        return (self.__time[-1] - self.__time[1])
+
+    def numSamples(self):
+        return len(self.__time)
+
+    def expectedSamples(self):
+        return self.elapsed() / MPU_SAMPLE_PERIOD_S
+
+    def meanSampleRate(self):
+        t = 0
+        for i in range(len(self.__time)-2):
+            t += self.__time[i+1] - self.__time[i]
+        return (t / (len(self.__time)-2))
+
     def __procLog(self, log):
         self.__time = []
         self.__accel_x = []
@@ -151,13 +166,15 @@ def log(arg, filename):
         ser.reset_input_buffer()
 
         f = open(filename, "w+")
-
+        start = time.time()
         while getattr(t, "do_run", True):
             if ser.inWaiting() > 0:
                 f.write(ser.read(ser.inWaiting()).decode("utf-8"))
                 ser.write("a".encode("utf-8"))
             time.sleep(0.1)
-
+            elapsed = time.time() - start
+            print(f"\r\tLogger time: {elapsed:.2f}s",end="")
+        print("\r")
         f.close()
 
 def main():
@@ -165,17 +182,24 @@ def main():
     parser.add_argument("--filename", type=str, required=True)
     args = parser.parse_args()
 
-    print("Capturing...")
+    print("Capturing (press Enter to stop)...")
     t = threading.Thread(target=log, args=("task",args.filename,))
     t.start()
     sys.stdin.read(1)
     t.do_run = False
     t.join()
 
-    print("Plotting...")
+
     u = Analysis(args.filename)
     u.read(args.filename)
     u.proc()
+
+    print("Plotting...")
+    print(f"\tDevice time: {u.elapsed():.2f}s")
+    print(f"\tNum samples: {u.numSamples()}")
+    print(f"\tCaptured sample rate: {u.meanSampleRate():.2f}s")
+    print(f"\tExpected samples: {u.expectedSamples():.0f}")
+    print(f"\tExpected sample rate: {MPU_SAMPLE_PERIOD_S}s")
     u.plotAll()
 
 if "__main__" == __name__:
