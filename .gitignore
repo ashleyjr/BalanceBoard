@@ -25,3 +25,8 @@ fp-info-cache
 
 # Backups
 hardware/rev_a/BalanceBoard/BalanceBoard-backups/*
+
+# Stop WiFi password making it in to repo
+software/rev_b/tests/bw/esp/sdkconfig*
+
+
