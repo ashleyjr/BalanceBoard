@@ -1,2 +1,1 @@
-./build.sh
-idf.py build monitor
+idf.py flash monitor
