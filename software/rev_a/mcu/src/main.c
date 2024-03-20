@@ -11,7 +11,8 @@
 
 #define UART_BUF_SIZE      50
 
-#define SMB_TARGET         0xD0 // SMB target address of IMU
+#define SMB_TARGET_DRV     0xB4 // SMB target address of Motor Driver
+#define SMB_TARGET_IMU     0xD0 // SMB target address of IMU
 #define SMB_MTSTA          0xE0 // (MT) start transmitted
 #define SMB_MTDB           0xC0 // (MT) data byte transmitted
 #define SMB_MRDB           0x80 // (MR) data byte received
@@ -37,6 +38,8 @@
 #define SMB_STATE_WR1      0x01
 #define SMB_STATE_WR_STOP  0x00
 
+SBIT(PWM, SFR_P1, 4);  
+
 //-----------------------------------------------------------------------------
 // Global Variables
 //-----------------------------------------------------------------------------
@@ -45,9 +48,10 @@ volatile U8 uart_buf[UART_BUF_SIZE];
 volatile U8 uart_head;
 volatile U8 uart_tail;
 
-volatile U8 smb_data_in;              // Global holder for SMBus data.
-volatile U8 smb_data_out [2];         // Global holder for SMBus data.
-volatile U8 smb_busy;                 // Software flag to indicate when the
+volatile U8 smb_target;                // Target device
+volatile U8 smb_data_in;               // Global holder for SMBus data.
+volatile U8 smb_data_out [2];          // Global holder for SMBus data.
+volatile U8 smb_busy;                  // Software flag to indicate when the
 volatile U8 smb_rnw;                   // Software flag to indicate the
 volatile U8 smb_ptr;
 
@@ -73,45 +77,72 @@ U8 uartEmpty(void);
 void setup(void);
 U8 nibble2hex(U8);
 void smbReadMpuSensors (void);
-U8 smbRead(U8 addr);
-void smbWrite(U8 addr, U8 data);
+U8 smbRead(U8 target, U8 addr);
+void smbWrite(U8 target, U8 addr, U8 data);
 void sendU16(U16 s);
 
 //-----------------------------------------------------------------------------
 // Main Routine
 //-----------------------------------------------------------------------------
 
-void main (void){            
+void main (void){             
+   U8 i;
+   U16 j;
    setup();  
    
    // Sample counter to 0
    sample = 0;  
 
-   p = 0;
-
    // Setup UART buffer
    uart_head = 0;
    uart_tail = 0;
+ 
+   // Reset all devices on I2C bus
+   //smbWrite(SMB_TARGET_IMU, 0x6B, 0x80);  
+   //smbWrite(SMB_TARGET_DRV, 0x01, 0x80);   
 
-   // MPU out of sleep
-   smbWrite(0x6B, 0x00);  
+   //// Check Motor Driver ID 
+   
+   smbWrite(SMB_TARGET_DRV, 0x01, 0x07); // Out of standby and auto cal mode
+   smbWrite(SMB_TARGET_DRV, 0x1A, 0x38); // ERM Mode, FB_BRAKE_FATOR == 4x, LOOP_GAIN == Medium 
+   smbWrite(SMB_TARGET_DRV, 0x16, 0x7F); // RATED_VOLTAGE == 0x7F 
+   smbWrite(SMB_TARGET_DRV, 0x17, 0x7F); // OD_CLAMP == 0x7F (signed) 
+   smbWrite(SMB_TARGET_DRV, 0x1E, 0x20); // AUTO_CAL_TIME == 500ms to 700ms
+   smbWrite(SMB_TARGET_DRV, 0x1B, 0x9F); // DRIVE_TIME == 0x1F
+   smbWrite(SMB_TARGET_DRV, 0x0C, 0x01); // Set GO bit to start auto cal
+   for(i=0;i<5;i++){
+      j = smbRead(SMB_TARGET_DRV, 0x00);
+      while(0 == uartEmpty());
+      sendU16(j);
+      uartTx('\n');
+   } 
+   smbWrite(SMB_TARGET_DRV, 0x01, 0x03);   
+
 
    for(;;){
-      smbReadMpuSensors();      
-      if(uartEmpty()){
-         while(smb_busy);
-         sendU16(sample); 
-         sendU16(accel_x); 
-         sendU16(accel_y);
-         sendU16(accel_z); 
-         sendU16(gyro_x);
-         sendU16(gyro_y);
-         sendU16(gyro_z);
-         sendU16(p);
-         uartTx('\n');
-      }
-      go = 0;
-      while(!go);
+      for(j=0;j<10;j++) PWM = 1; 
+      for(j=0;j<10;j++) PWM = 0;
+   }
+   // MPU out of sleep
+   //smbWrite(SMB_TARGET_IMU, 0x6B, 0x00);  
+
+  
+   for(;;){
+      //smbReadMpuSensors();      
+      //if(uartEmpty()){
+      //   while(smb_busy);
+      //   sendU16(sample); 
+      //   sendU16(accel_x); 
+      //   sendU16(accel_y);
+      //   sendU16(accel_z); 
+      //   sendU16(gyro_x);
+      //   sendU16(gyro_y);
+      //   sendU16(gyro_z);
+      //   sendU16(p);
+      //   uartTx('\n');
+      //}
+      //go = 0;
+      //while(!go);
    }
 }
 
@@ -181,17 +212,16 @@ INTERRUPT (TIMER3_ISR, TIMER3_IRQn){
 INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){ 
    switch (SMB0CN & 0xF0) {
       // Master Transmitter/Receiver: START condition transmitted.
-      case SMB_MTSTA:   SMB0DAT = SMB_TARGET;            // Load address of the target slave (only one)
-                        SMB0DAT &= 0xFE;                 // Clear the LSB of the address for the 
-                        SMB0DAT |= smb_rnw;               // Load R/W bit
-                        SMB0CN_STA = 0;                  // Manually clear START bit 
+      case SMB_MTSTA:   SMB0DAT = smb_target;               // Load address of the target slave (only one)
+                        SMB0DAT &= 0xFE;                    // Clear the LSB of the address for the 
+                        SMB0DAT |= smb_rnw;                 // Load R/W bit
+                        SMB0CN_STA = 0;                     // Manually clear START bit 
                         break;
       // Master Transmitter: Data byte transmitted only writes
       case SMB_MTDB:    if(SMB0CN_ACK) {
                            switch(mpu_state){ 
                               case SMB_STATE_RD1:        mpu_state = SMB_STATE_RD_STOP;
                                                          break;
-                              case SMB_STATE_RD_STOP:    break; 
                               case SMB_STATE_WR2:        SMB0DAT = smb_data_out[1]; 
                                                          mpu_state = SMB_STATE_WR1;
                                                          break;
@@ -272,11 +302,12 @@ INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){
                                                    SMB0CN_ACK = 0;                  
                                                    SMB0CN_STO = 1;                  
                                                    break;
-                           default:                smb_data_in = SMB0DAT; 
-                                                   smb_busy = 0;                    // Free SMBus interface
-                                                   SMB0CN_ACK = 0;                  // Send NACK to indicate last byte  of this transfer
-                                                   SMB0CN_STO = 1;                  // Send STOP to terminate transfer
-                                                   break;
+                           case SMB_STATE_RD_STOP: smb_data_in = SMB0DAT;
+                                                   SMB0CN_ACK = 0;                  
+                                                   SMB0CN_STO = 1;                  
+                                                   smb_busy = 0;
+                                                   break; 
+                           default:                break;
                         }
                         break;
       default:          break;
@@ -287,6 +318,7 @@ INTERRUPT(SMBUS0_ISR, SMBUS0_IRQn){
 
 void smbReadMpuSensors (void) {
    while (smb_busy);             // Wait for bus to be free.
+   smb_target = SMB_TARGET_IMU;
    mpu_state = SMB_STATE_WR1;
    smb_data_out[0] = 0x3B;
    smb_busy = 1;                 // Claim SMBus (set to busy)  
@@ -299,8 +331,9 @@ void smbReadMpuSensors (void) {
    SMB0CN_STA = 1;               // Start transfer  
 }
 
-U8 smbRead (U8 addr){
+U8 smbRead (U8 target, U8 addr){
    while (smb_busy);          // Wait for bus to be free.
+   smb_target = target;
    mpu_state = SMB_STATE_WR1;
    smb_data_out[0] = addr;
    smb_busy = 1;              // Claim SMBus (set to busy)  
@@ -315,8 +348,9 @@ U8 smbRead (U8 addr){
    return smb_data_in;
 }
 
-void smbWrite (U8 addr, U8 data){
+void smbWrite (U8 target, U8 addr, U8 data){
    while(smb_busy);
+   smb_target = target;
    mpu_state = SMB_STATE_WR2;
    smb_data_out[1] = addr;
    smb_data_out[0] = data;
@@ -342,6 +376,7 @@ U8 uartEmpty(void){
       return 0;
    }
 }
+
 //-----------------------------------------------------------------------------
 // Setup
 //-----------------------------------------------------------------------------
@@ -363,7 +398,15 @@ void setup(void){
               P0SKIP_B6__SKIPPED|
               P0SKIP_B7__SKIPPED;
 
-   P1MDOUT  = 0x00;
+   P1MDOUT  = P1MDOUT_B0__OPEN_DRAIN|  
+              P1MDOUT_B1__OPEN_DRAIN|
+              P1MDOUT_B2__OPEN_DRAIN|
+              P1MDOUT_B3__OPEN_DRAIN|
+              P1MDOUT_B4__PUSH_PULL |
+              P1MDOUT_B5__OPEN_DRAIN| 
+              P1MDOUT_B6__OPEN_DRAIN|
+              P1MDOUT_B7__OPEN_DRAIN;
+   
    P1SKIP   = P1SKIP_B0__SKIPPED|
               P1SKIP_B1__SKIPPED|
               P1SKIP_B2__SKIPPED|

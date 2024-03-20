@@ -177,10 +177,35 @@ def log(arg, filename):
         print("\r")
         f.close()
 
+def raw(arg):
+    t = threading.currentThread()
+    with serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1) as ser:
+        ser.flush()
+        ser.flushInput()
+        ser.flushOutput()
+        ser.reset_input_buffer()
+        while getattr(t, "do_run", True):
+            if ser.inWaiting() > 0:
+                try:
+                    print(ser.read(ser.inWaiting()).decode("utf-8"), end="")
+                except UnicodeDecodeError:
+                    pass
+            time.sleep(0.1)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filename", type=str, required=True)
+    parser.add_argument("--filename", type=str)
+    parser.add_argument("--raw", action='store_true')
     args = parser.parse_args()
+
+    if args.raw:
+        t = threading.Thread(target=raw, args=("task",))
+        t.start()
+        sys.stdin.read(1)
+        t.do_run = False
+        t.join()
+        return
 
     print("Capturing (press Enter to stop)...")
     t = threading.Thread(target=log, args=("task",args.filename,))
