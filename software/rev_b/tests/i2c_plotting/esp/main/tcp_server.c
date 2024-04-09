@@ -33,7 +33,8 @@
 #define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
 
 #define MAX_SIZE 1024
-static const char *TAG = "example";
+
+static const char *TAG = "i2c";
 
 #define I2C_MASTER_SCL_IO           25          /*!< GPIO number used for I2C master clock */
 #define I2C_MASTER_SDA_IO           26          /*!< GPIO number used for I2C master data  */
@@ -59,7 +60,9 @@ static const char *TAG = "example";
 #define MPU6050_GYRO_YOUT_L         0x46
 #define MPU6050_GYRO_ZOUT_H         0x47
 #define MPU6050_GYRO_ZOUT_L         0x48
+#define NUM_REGS                    14
 
+MessageBufferHandle_t buf;
 
 static esp_err_t mpu9250_register_read(uint8_t reg_addr, uint8_t *data, size_t len)
 {
@@ -108,26 +111,32 @@ static esp_err_t i2c_master_init(void)
 static void do_retransmit(const int sock){
    int i;
    int len;
-   char buf[MAX_SIZE]; 
-   uint8_t raw_data[14];
-   int16_t data[7]; 
-    
+   char str[MAX_SIZE]; 
+   uint8_t raw_data[NUM_REGS]; 
+   int16_t data[NUM_REGS/2]; 
+
    // Handle socket 
    do {
-      len = recv(sock, buf, sizeof(buf) - 1, 0);
+      len = recv(sock, str, sizeof(str) - 1, 0);
       if (len < 0) {
          ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
       } else if (len == 0) {
          ESP_LOGW(TAG, "Connection closed");
       } else {
-         ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, 14));
-         
-         for(i=0;i<14;i+=2){
+         if(pdFALSE == xMessageBufferIsEmpty(buf)){
+            xMessageBufferReceive( 
+               buf,
+               raw_data,
+               sizeof(raw_data),
+               0 
+            );
+         }
+         for(i=0;i<NUM_REGS;i+=2){
            data[i/2] = raw_data[i];
            data[i/2] <<= 8;
-           data[i/2] |= raw_data[i]; 
+           data[i/2] |= raw_data[i+1]; 
          }
-         sprintf(buf, "%d,%d,%d,%d,%d,%d,%d", 
+         sprintf(str, "%d,%d,%d,%d,%d,%d,%d", 
             data[0],
             data[1],
             data[2],
@@ -136,8 +145,7 @@ static void do_retransmit(const int sock){
             data[5],
             data[6]
          );
-
-         send(sock, buf, strlen(buf), 0);
+         send(sock, str, strlen(str), 0);
       }
    } while (len > 0);
 }
@@ -153,7 +161,7 @@ static void tcp_server_task(void *pvParameters)
     int keepCount = KEEPALIVE_COUNT;
     struct sockaddr_storage dest_addr;
 
-#ifdef CONFIG_EXAMPLE_IPV4
+
     if (addr_family == AF_INET) {
         struct sockaddr_in *dest_addr_ip4 = (struct sockaddr_in *)&dest_addr;
         dest_addr_ip4->sin_addr.s_addr = htonl(INADDR_ANY);
@@ -161,16 +169,7 @@ static void tcp_server_task(void *pvParameters)
         dest_addr_ip4->sin_port = htons(PORT);
         ip_protocol = IPPROTO_IP;
     }
-#endif
-#ifdef CONFIG_EXAMPLE_IPV6
-    if (addr_family == AF_INET6) {
-        struct sockaddr_in6 *dest_addr_ip6 = (struct sockaddr_in6 *)&dest_addr;
-        bzero(&dest_addr_ip6->sin6_addr.un, sizeof(dest_addr_ip6->sin6_addr.un));
-        dest_addr_ip6->sin6_family = AF_INET6;
-        dest_addr_ip6->sin6_port = htons(PORT);
-        ip_protocol = IPPROTO_IPV6;
-    }
-#endif
+
 
     int listen_sock = socket(addr_family, SOCK_STREAM, ip_protocol);
     if (listen_sock < 0) {
@@ -180,11 +179,7 @@ static void tcp_server_task(void *pvParameters)
     }
     int opt = 1;
     setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#if defined(CONFIG_EXAMPLE_IPV4) && defined(CONFIG_EXAMPLE_IPV6)
-    // Note that by default IPV6 binds to both protocols, it is must be disabled
-    // if both protocols used at the same time (used in CI)
-    setsockopt(listen_sock, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
-#endif
+
 
     ESP_LOGI(TAG, "Socket created");
 
@@ -220,16 +215,12 @@ static void tcp_server_task(void *pvParameters)
         setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(int));
         setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
         // Convert ip address to string
-#ifdef CONFIG_EXAMPLE_IPV4
+
         if (source_addr.ss_family == PF_INET) {
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
         }
-#endif
-#ifdef CONFIG_EXAMPLE_IPV6
-        if (source_addr.ss_family == PF_INET6) {
-            inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
-        }
-#endif
+
+
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
         do_retransmit(sock);
@@ -243,9 +234,30 @@ CLEAN_UP:
     vTaskDelete(NULL);
 }
 
+static void timer_expired(TimerHandle_t xTimer){
+   uint8_t raw_data[NUM_REGS]; 
+   uint8_t i;
+
+   ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
+
+   // Place sample in buffer if it's empty
+   if(pdFALSE == xMessageBufferIsFull(buf)){
+      xMessageBufferSend( 
+         buf,
+         raw_data,
+         sizeof(raw_data),
+         0 
+      );
+   } 
+}
+
 void app_main(void)
 {
-    
+    TimerHandle_t xTimer;
+   
+    const size_t size = NUM_REGS * 2;
+        
+    buf = xMessageBufferCreate(size);
 
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C initialized successfully");
@@ -263,10 +275,9 @@ void app_main(void)
      */
     ESP_ERROR_CHECK(example_connect());
 
-#ifdef CONFIG_EXAMPLE_IPV4
+    xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(100), pdTRUE, (void *) 0, timer_expired); 
+    
     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
-#endif
-#ifdef CONFIG_EXAMPLE_IPV6
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET6, 5, NULL);
-#endif
+
+    xTimerStart(xTimer, 0);
 }
