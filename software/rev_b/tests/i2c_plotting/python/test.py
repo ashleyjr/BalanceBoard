@@ -14,13 +14,8 @@ fig = plt.figure()
 ax1 = fig.add_subplot(2,1,1)
 ax2 = fig.add_subplot(2,1,2)
 
-ax = []
-ay = []
-az = []
-
-gx = []
-gy = []
-gz = []
+accel = []
+duty = []
 
 def get_data():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -31,23 +26,14 @@ def get_data():
             data_str = data.decode("utf-8")
             datas = data_str.split(',')
 
-            ax.append(int(datas[0]))
-            ay.append(int(datas[1]))
-            az.append(int(datas[2]))
-
-            gx.append(int(datas[4]))
-            gy.append(int(datas[5]))
-            gz.append(int(datas[6]))
+            accel.append(int(datas[0]))
+            duty.append(int(datas[1]))
 
 def animate(time):
     ax1.clear()
-    ax1.plot(range(len(ax)), ax)
-    ax1.plot(range(len(ay)), ay)
-    ax1.plot(range(len(az)), az)
+    ax1.plot(range(len(accel)), accel)
     ax2.clear()
-    ax2.plot(range(len(gx)), gx)
-    ax2.plot(range(len(gy)), gy)
-    ax2.plot(range(len(gz)), gz)
+    ax2.plot(range(len(duty)), duty)
 
 if __name__ =="__main__":
     t = threading.Thread(target=get_data)

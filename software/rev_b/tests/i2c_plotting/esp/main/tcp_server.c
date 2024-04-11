@@ -24,6 +24,8 @@
 #include <lwip/netdb.h>
 
 #include "driver/i2c.h"
+#include "driver/mcpwm_prelude.h"
+
 
 
 
@@ -62,6 +64,22 @@ static const char *TAG = "i2c";
 #define MPU6050_GYRO_ZOUT_L         0x48
 #define NUM_REGS                    14
 
+// Please consult the datasheet of your servo before changing the following parameters
+#define SERVO_MIN_PULSEWIDTH_US 500  // Minimum pulse width in microsecond
+#define SERVO_MAX_PULSEWIDTH_US 2500  // Maximum pulse width in microsecond
+#define SERVO_MIN_DEGREE        -90   // Minimum angle
+#define SERVO_MAX_DEGREE        90    // Maximum angle
+
+#define SERVO_PULSE_GPIO             32        // GPIO connects to the PWM signal line
+#define SERVO_TIMEBASE_RESOLUTION_HZ 1000000  // 1MHz, 1us per tick
+#define SERVO_TIMEBASE_PERIOD        20000    // 20000 ticks, 20ms
+
+struct Sample {
+   int16_t accel;       
+   int16_t duty; 
+}; 
+
+mcpwm_cmpr_handle_t comparator;
 MessageBufferHandle_t buf;
 
 static esp_err_t mpu9250_register_read(uint8_t reg_addr, uint8_t *data, size_t len)
@@ -112,8 +130,7 @@ static void do_retransmit(const int sock){
    int i;
    int len;
    char str[MAX_SIZE]; 
-   uint8_t raw_data[NUM_REGS]; 
-   int16_t data[NUM_REGS/2]; 
+   struct Sample s;
 
    // Handle socket 
    do {
@@ -126,24 +143,14 @@ static void do_retransmit(const int sock){
          if(pdFALSE == xMessageBufferIsEmpty(buf)){
             xMessageBufferReceive( 
                buf,
-               raw_data,
-               sizeof(raw_data),
+               &s,
+               sizeof(s),
                0 
             );
          }
-         for(i=0;i<NUM_REGS;i+=2){
-           data[i/2] = raw_data[i];
-           data[i/2] <<= 8;
-           data[i/2] |= raw_data[i+1]; 
-         }
-         sprintf(str, "%d,%d,%d,%d,%d,%d,%d", 
-            data[0],
-            data[1],
-            data[2],
-            data[3],
-            data[4],
-            data[5],
-            data[6]
+         sprintf(str, "%d,%d", 
+            s.accel,
+            s.duty
          );
          send(sock, str, strlen(str), 0);
       }
@@ -228,7 +235,6 @@ static void tcp_server_task(void *pvParameters)
         shutdown(sock, 0);
         close(sock);
     }
-
 CLEAN_UP:
     close(listen_sock);
     vTaskDelete(NULL);
@@ -237,15 +243,25 @@ CLEAN_UP:
 static void timer_expired(TimerHandle_t xTimer){
    uint8_t raw_data[NUM_REGS]; 
    uint8_t i;
+   struct Sample s;
 
    ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
+
+   s.accel = (raw_data[0] << 8) | raw_data[1];
+   s.duty = (s.accel / 163); 
+   
+   if(s.duty > 100) s.duty = 100;
+   if(s.duty < 0  ) s.duty = 0;
+
+   
+   ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (s.duty * 200)));
 
    // Place sample in buffer if it's empty
    if(pdFALSE == xMessageBufferIsFull(buf)){
       xMessageBufferSend( 
          buf,
-         raw_data,
-         sizeof(raw_data),
+         &s,
+         sizeof(s),
          0 
       );
    } 
@@ -258,12 +274,60 @@ void app_main(void)
     const size_t size = NUM_REGS * 2;
         
     buf = xMessageBufferCreate(size);
+    
+    ESP_LOGI(TAG, "Create timer and operator");
+    mcpwm_timer_handle_t timer = NULL;
+    mcpwm_timer_config_t timer_config = {
+        .group_id = 0,
+        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = SERVO_TIMEBASE_RESOLUTION_HZ,
+        .period_ticks = SERVO_TIMEBASE_PERIOD,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
+
+    mcpwm_oper_handle_t oper = NULL;
+    mcpwm_operator_config_t operator_config = {
+        .group_id = 0, // operator must be in the same group to the timer
+    };
+    ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &oper));
+
+    ESP_LOGI(TAG, "Connect timer and operator");
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
+
+    ESP_LOGI(TAG, "Create comparator and generator from the operator");
+    //mcpwm_cmpr_handle_t comparator = NULL;
+    mcpwm_comparator_config_t comparator_config = {
+        .flags.update_cmp_on_tez = true,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &comparator));
+
+    mcpwm_gen_handle_t generator = NULL;
+    mcpwm_generator_config_t generator_config = {
+        .gen_gpio_num = SERVO_PULSE_GPIO,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
+
+    // set the initial compare value, so that the servo will spin to the center position
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, 10000));
+
+    ESP_LOGI(TAG, "Set generator action on timer and compare event");
+    // go high on counter empty
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(generator,
+                                                              MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
+    // go low on compare threshold
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
+                                                                MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_LOW)));
+
+    ESP_LOGI(TAG, "Enable and start timer");
+    ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
+
 
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C initialized successfully");
 
     ESP_ERROR_CHECK(mpu9250_register_write_byte(MPU6050_PWR_MGMT_1_REG_ADDR, 0));
-
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
