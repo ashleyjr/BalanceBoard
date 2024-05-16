@@ -28,7 +28,7 @@ hardware/rev_a/BalanceBoard/BalanceBoard-backups/*
 
 # Stop WiFi password making it in to repo
 software/rev_b/tests/*/esp/sdkconfig*
-
+software/rev_b/main/esp/sdkconfig* 
 
 
 
