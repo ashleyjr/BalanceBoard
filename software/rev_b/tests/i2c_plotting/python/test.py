@@ -21,7 +21,7 @@ def get_data():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((HOST, PORT))
         while(True):
-            s.sendall(bytes(f"1", encoding="ascii"))
+            s.sendall(bytes(0x00)
             data = s.recv(1024)
             data_str = data.decode("utf-8")
             datas = data_str.split(',')

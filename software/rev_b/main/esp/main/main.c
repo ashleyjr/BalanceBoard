@@ -74,9 +74,27 @@ static const char *TAG = "i2c";
 #define SERVO_TIMEBASE_RESOLUTION_HZ 1000000  // 1MHz, 1us per tick
 #define SERVO_TIMEBASE_PERIOD        20000    // 20000 ticks, 20ms
 
-struct Sample {
-   int16_t accel;       
-   int16_t duty; 
+#define CMD_SAMPLE_ACCEL_X '0' 
+#define CMD_SAMPLE_ACCEL_Y '1' 
+#define CMD_SAMPLE_ACCEL_Z '2' 
+#define CMD_SAMPLE_GYRO_X  '3' 
+#define CMD_SAMPLE_GYRO_Y  '4' 
+#define CMD_SAMPLE_GYRO_Z  '5' 
+
+
+struct Sensor {
+   uint8_t menu;
+   int16_t accel_x;   
+   int16_t accel_y;   
+   int16_t accel_z;    
+   int16_t gyro_x;   
+   int16_t gyro_y;   
+   int16_t gyro_z;   
+   uint8_t motor_stby;
+   uint8_t motor_a_dir; 
+   uint8_t motor_a_pwm; 
+   uint8_t motor_b_dir; 
+   uint8_t motor_b_pwm; 
 }; 
 
 mcpwm_cmpr_handle_t comparator;
@@ -126,11 +144,10 @@ static esp_err_t i2c_master_init(void)
 
     return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
 }
-static void do_retransmit(const int sock){
-   int i;
+static void do_retransmit(const int sock){ 
    int len;
    char str[MAX_SIZE]; 
-   struct Sample s;
+   struct Sensor s;
 
    // Handle socket 
    do {
@@ -140,6 +157,7 @@ static void do_retransmit(const int sock){
       } else if (len == 0) {
          ESP_LOGW(TAG, "Connection closed");
       } else {
+         // Get the current sensor output from the timer process
          if(pdFALSE == xMessageBufferIsEmpty(buf)){
             xMessageBufferReceive( 
                buf,
@@ -148,10 +166,15 @@ static void do_retransmit(const int sock){
                0 
             );
          }
-         sprintf(str, "%d,%d", 
-            s.accel,
-            s.duty
-         );
+         // Use the first char as the comand
+         switch(str[0]){
+            case CMD_SAMPLE_ACCEL_X: sprintf(str, "%d", s.accel_x); break;
+            case CMD_SAMPLE_ACCEL_Y: sprintf(str, "%d", s.accel_y); break;
+            case CMD_SAMPLE_ACCEL_Z: sprintf(str, "%d", s.accel_z); break;
+            case CMD_SAMPLE_GYRO_X:  sprintf(str, "%d", s.gyro_x);  break;
+            case CMD_SAMPLE_GYRO_Y:  sprintf(str, "%d", s.gyro_y);  break;
+            case CMD_SAMPLE_GYRO_Z:  sprintf(str, "%d", s.gyro_z);  break;
+         }
          send(sock, str, strlen(str), 0);
       }
    } while (len > 0);
@@ -241,20 +264,25 @@ CLEAN_UP:
 }
 
 static void timer_expired(TimerHandle_t xTimer){
-   uint8_t raw_data[NUM_REGS]; 
-   uint8_t i;
-   struct Sample s;
+   uint8_t raw_data[NUM_REGS];  
+   struct Sensor s;
 
    ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
 
-   s.accel = (raw_data[0] << 8) | raw_data[1];
-   s.duty = (s.accel / 163); 
+   s.accel_x = (raw_data[0] << 8)  | raw_data[1];
+   s.accel_y = (raw_data[2] << 8)  | raw_data[3];
+   s.accel_z = (raw_data[4] << 8)  | raw_data[5];
+   s.gyro_x  = (raw_data[6] << 8)  | raw_data[7];
+   s.gyro_y  = (raw_data[8] << 8)  | raw_data[9];
+   s.gyro_z  = (raw_data[10] << 8) | raw_data[11];
    
-   if(s.duty > 100) s.duty = 100;
-   if(s.duty < 0  ) s.duty = 0;
+   //s.duty = (s.accel / 163); 
+   //
+   //if(s.duty > 100) s.duty = 100;
+   //if(s.duty < 0  ) s.duty = 0;
 
-   
-   ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (s.duty * 200)));
+   //
+   //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (s.duty * 200)));
 
    // Place sample in buffer if it's empty
    if(pdFALSE == xMessageBufferIsFull(buf)){
