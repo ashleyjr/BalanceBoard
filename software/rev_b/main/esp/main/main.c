@@ -64,15 +64,9 @@ static const char *TAG = "i2c";
 #define MPU6050_GYRO_ZOUT_L         0x48
 #define NUM_REGS                    14
 
-// Please consult the datasheet of your servo before changing the following parameters
-#define SERVO_MIN_PULSEWIDTH_US 500  // Minimum pulse width in microsecond
-#define SERVO_MAX_PULSEWIDTH_US 2500  // Maximum pulse width in microsecond
-#define SERVO_MIN_DEGREE        -90   // Minimum angle
-#define SERVO_MAX_DEGREE        90    // Maximum angle
-
 #define SERVO_PULSE_GPIO             32        // GPIO connects to the PWM signal line
 #define SERVO_TIMEBASE_RESOLUTION_HZ 1000000  // 1MHz, 1us per tick
-#define SERVO_TIMEBASE_PERIOD        20000    // 20000 ticks, 20ms
+#define SERVO_TIMEBASE_PERIOD        255    // 20000 ticks, 20ms
 
 #define CMD_SAMPLE_ACCEL_X '0' 
 #define CMD_SAMPLE_ACCEL_Y '1' 
@@ -83,13 +77,16 @@ static const char *TAG = "i2c";
 
 
 struct Sensor {
-   uint8_t menu;
    int16_t accel_x;   
    int16_t accel_y;   
    int16_t accel_z;    
    int16_t gyro_x;   
    int16_t gyro_y;   
    int16_t gyro_z;   
+}; 
+
+struct Config {
+   uint8_t menu;
    uint8_t motor_stby;
    uint8_t motor_a_dir; 
    uint8_t motor_a_pwm; 
@@ -98,7 +95,9 @@ struct Sensor {
 }; 
 
 mcpwm_cmpr_handle_t comparator;
-MessageBufferHandle_t buf;
+
+MessageBufferHandle_t buf_sensor;
+MessageBufferHandle_t buf_config;
 
 static esp_err_t mpu9250_register_read(uint8_t reg_addr, uint8_t *data, size_t len)
 {
@@ -148,6 +147,7 @@ static void do_retransmit(const int sock){
    int len;
    char str[MAX_SIZE]; 
    struct Sensor s;
+   struct Config c;
 
    // Handle socket 
    do {
@@ -157,15 +157,30 @@ static void do_retransmit(const int sock){
       } else if (len == 0) {
          ESP_LOGW(TAG, "Connection closed");
       } else {
+         // Push the config to the timer process  
+         if(pdFALSE == xMessageBufferIsFull(buf_config)){
+            c.menu        = (uint8_t)str[1];
+            c.motor_stby  = 0;
+            c.motor_a_dir = 0; 
+            c.motor_a_pwm = 0; 
+            c.motor_b_dir = 0; 
+            c.motor_b_pwm = 0; 
+            xMessageBufferSend( 
+               buf_config,
+               &c,
+               sizeof(c),
+               0 
+            );
+         }
          // Get the current sensor output from the timer process
-         if(pdFALSE == xMessageBufferIsEmpty(buf)){
+         if(pdFALSE == xMessageBufferIsEmpty(buf_sensor)){
             xMessageBufferReceive( 
-               buf,
+               buf_sensor,
                &s,
                sizeof(s),
                0 
             );
-         }
+         }  
          // Use the first char as the comand
          switch(str[0]){
             case CMD_SAMPLE_ACCEL_X: sprintf(str, "%d", s.accel_x); break;
@@ -175,6 +190,7 @@ static void do_retransmit(const int sock){
             case CMD_SAMPLE_GYRO_Y:  sprintf(str, "%d", s.gyro_y);  break;
             case CMD_SAMPLE_GYRO_Z:  sprintf(str, "%d", s.gyro_z);  break;
          }
+         // Return the data
          send(sock, str, strlen(str), 0);
       }
    } while (len > 0);
@@ -266,6 +282,7 @@ CLEAN_UP:
 static void timer_expired(TimerHandle_t xTimer){
    uint8_t raw_data[NUM_REGS];  
    struct Sensor s;
+   struct Config c;
 
    ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
 
@@ -275,33 +292,37 @@ static void timer_expired(TimerHandle_t xTimer){
    s.gyro_x  = (raw_data[6] << 8)  | raw_data[7];
    s.gyro_y  = (raw_data[8] << 8)  | raw_data[9];
    s.gyro_z  = (raw_data[10] << 8) | raw_data[11];
-   
-   //s.duty = (s.accel / 163); 
-   //
-   //if(s.duty > 100) s.duty = 100;
-   //if(s.duty < 0  ) s.duty = 0;
-
-   //
-   //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, (s.duty * 200)));
-
+      
    // Place sample in buffer if it's empty
-   if(pdFALSE == xMessageBufferIsFull(buf)){
+   if(pdFALSE == xMessageBufferIsFull(buf_sensor)){
       xMessageBufferSend( 
-         buf,
+         buf_sensor,
          &s,
          sizeof(s),
          0 
       );
-   } 
+   }
+
+   // Get the current sensor output from the timer process
+   if(pdFALSE == xMessageBufferIsEmpty(buf_config)){
+      xMessageBufferReceive( 
+         buf_config,
+         &c,
+         sizeof(c),
+         0 
+      );
+      ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, c.menu));
+   }
 }
 
 void app_main(void)
 {
     TimerHandle_t xTimer;
    
-    const size_t size = NUM_REGS * 2;
-        
-    buf = xMessageBufferCreate(size);
+    buf_config = xMessageBufferCreate(sizeof(struct Config) * 2);
+    buf_sensor = xMessageBufferCreate(sizeof(struct Sensor) * 2);
+
+
     
     ESP_LOGI(TAG, "Create timer and operator");
     mcpwm_timer_handle_t timer = NULL;
@@ -337,7 +358,7 @@ void app_main(void)
     ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
 
     // set the initial compare value, so that the servo will spin to the center position
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, 10000));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, 0));
 
     ESP_LOGI(TAG, "Set generator action on timer and compare event");
     // go high on counter empty
