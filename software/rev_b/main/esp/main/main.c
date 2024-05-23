@@ -26,17 +26,14 @@
 #include "driver/i2c.h"
 #include "driver/mcpwm_prelude.h"
 
-
-
+static const char *TAG = "main";
 
 #define PORT                        CONFIG_EXAMPLE_PORT
 #define KEEPALIVE_IDLE              CONFIG_EXAMPLE_KEEPALIVE_IDLE
 #define KEEPALIVE_INTERVAL          CONFIG_EXAMPLE_KEEPALIVE_INTERVAL
 #define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
 
-#define MAX_SIZE 1024
-
-static const char *TAG = "i2c";
+#define MAX_SIZE                    8
 
 #define I2C_MASTER_SCL_IO           25          /*!< GPIO number used for I2C master clock */
 #define I2C_MASTER_SDA_IO           26          /*!< GPIO number used for I2C master data  */
@@ -64,16 +61,18 @@ static const char *TAG = "i2c";
 #define MPU6050_GYRO_ZOUT_L         0x48
 #define NUM_REGS                    14
 
-#define SERVO_PULSE_GPIO             32        // GPIO connects to the PWM signal line
-#define SERVO_TIMEBASE_RESOLUTION_HZ 1000000  // 1MHz, 1us per tick
-#define SERVO_TIMEBASE_PERIOD        255    // 20000 ticks, 20ms
+#define MOTOR_A_PWM_GPIO            32        // GPIO connects to the PWM signal line
+#define MOTOR_B_PWM_GPIO            33        // GPIO connects to the PWM signal line
 
-#define CMD_SAMPLE_ACCEL_X '0' 
-#define CMD_SAMPLE_ACCEL_Y '1' 
-#define CMD_SAMPLE_ACCEL_Z '2' 
-#define CMD_SAMPLE_GYRO_X  '3' 
-#define CMD_SAMPLE_GYRO_Y  '4' 
-#define CMD_SAMPLE_GYRO_Z  '5' 
+#define PWM_RESOLUTION_HZ           1000000  // 1MHz, 1us per tick
+#define PWM_PERIOD                  255      // 20000 ticks, 20ms
+
+#define CMD_SAMPLE_ACCEL_X          0 
+#define CMD_SAMPLE_ACCEL_Y          1 
+#define CMD_SAMPLE_ACCEL_Z          2 
+#define CMD_SAMPLE_GYRO_X           3 
+#define CMD_SAMPLE_GYRO_Y           4 
+#define CMD_SAMPLE_GYRO_Z           5 
 
 
 struct Sensor {
@@ -87,14 +86,15 @@ struct Sensor {
 
 struct Config {
    uint8_t menu;
-   uint8_t motor_stby;
-   uint8_t motor_a_dir; 
+   bool    motor_stby;
+   bool    motor_a_dir; 
    uint8_t motor_a_pwm; 
-   uint8_t motor_b_dir; 
+   bool    motor_b_dir; 
    uint8_t motor_b_pwm; 
 }; 
 
-mcpwm_cmpr_handle_t comparator;
+mcpwm_cmpr_handle_t motor_a_comp;
+mcpwm_cmpr_handle_t motor_b_comp;
 
 MessageBufferHandle_t buf_sensor;
 MessageBufferHandle_t buf_config;
@@ -160,11 +160,11 @@ static void do_retransmit(const int sock){
          // Push the config to the timer process  
          if(pdFALSE == xMessageBufferIsFull(buf_config)){
             c.menu        = (uint8_t)str[1];
-            c.motor_stby  = 0;
-            c.motor_a_dir = 0; 
-            c.motor_a_pwm = 0; 
-            c.motor_b_dir = 0; 
-            c.motor_b_pwm = 0; 
+            c.motor_stby  = (bool)(uint8_t)str[2];
+            c.motor_a_dir = (bool)(uint8_t)str[3]; 
+            c.motor_a_pwm = (uint8_t)str[4]; 
+            c.motor_b_dir = (bool)(uint8_t)str[5]; 
+            c.motor_b_pwm = (uint8_t)str[6]; 
             xMessageBufferSend( 
                buf_config,
                &c,
@@ -182,7 +182,7 @@ static void do_retransmit(const int sock){
             );
          }  
          // Use the first char as the comand
-         switch(str[0]){
+         switch((uint8_t)str[0]){
             case CMD_SAMPLE_ACCEL_X: sprintf(str, "%d", s.accel_x); break;
             case CMD_SAMPLE_ACCEL_Y: sprintf(str, "%d", s.accel_y); break;
             case CMD_SAMPLE_ACCEL_Z: sprintf(str, "%d", s.accel_z); break;
@@ -190,6 +190,7 @@ static void do_retransmit(const int sock){
             case CMD_SAMPLE_GYRO_Y:  sprintf(str, "%d", s.gyro_y);  break;
             case CMD_SAMPLE_GYRO_Z:  sprintf(str, "%d", s.gyro_z);  break;
          }
+                  
          // Return the data
          send(sock, str, strlen(str), 0);
       }
@@ -311,86 +312,104 @@ static void timer_expired(TimerHandle_t xTimer){
          sizeof(c),
          0 
       );
-      ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, c.menu));
+      
+      ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, c.motor_a_pwm));
+      //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, c.motor_b_pwm));
+
    }
 }
 
-void app_main(void)
-{
-    TimerHandle_t xTimer;
+void app_main(void){
+   TimerHandle_t xTimer;
+   buf_config = xMessageBufferCreate(sizeof(struct Config) * 2);
+   buf_sensor = xMessageBufferCreate(sizeof(struct Sensor) * 2);   
    
-    buf_config = xMessageBufferCreate(sizeof(struct Config) * 2);
-    buf_sensor = xMessageBufferCreate(sizeof(struct Sensor) * 2);
+   // Create timer 
+   mcpwm_timer_handle_t timer = NULL;
+   mcpwm_timer_config_t timer_config = {
+       .group_id = 0,
+       .clk_src         = MCPWM_TIMER_CLK_SRC_DEFAULT,
+       .resolution_hz   = PWM_RESOLUTION_HZ,
+       .period_ticks    = PWM_PERIOD,
+       .count_mode      = MCPWM_TIMER_COUNT_MODE_UP,
+   };
+   ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
+   
+   // Create operator
+   mcpwm_oper_handle_t oper = NULL;
+   mcpwm_operator_config_t operator_config = {
+       .group_id = 0, 
+   };
+   ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &oper)); 
+   ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
+   
+   // Create comparators 
+   mcpwm_comparator_config_t comparator_config = {
+       .flags.update_cmp_on_tez = true,
+   };
+   ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &motor_a_comp));
+   //ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &motor_b_comp));
+   
+   // Assign GPIO for motor A
+   mcpwm_gen_handle_t gen_motor_a = NULL;
+   mcpwm_generator_config_t gen_motor_a_config = {
+       .gen_gpio_num = MOTOR_A_PWM_GPIO,
+   };
+   ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_a_config, &gen_motor_a));
+  
+   // Assign GPIO for motor B
+   //mcpwm_gen_handle_t gen_motor_b = NULL;
+   //mcpwm_generator_config_t gen_motor_b_config = {
+   //    .gen_gpio_num = MOTOR_B_PWM_GPIO,
+   //};
+   //ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_b_config, &gen_motor_b));
 
+   // set the initial compare value, so that the servo will spin to the center position
+   ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, 0));
+   //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, 0));
+   
+   // go high on counter empty
+   ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
+      gen_motor_a,
+      MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH))
+   );
+   //ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
+   //   gen_motor_b,
+   //   MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH))
+   //);
 
-    
-    ESP_LOGI(TAG, "Create timer and operator");
-    mcpwm_timer_handle_t timer = NULL;
-    mcpwm_timer_config_t timer_config = {
-        .group_id = 0,
-        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
-        .resolution_hz = SERVO_TIMEBASE_RESOLUTION_HZ,
-        .period_ticks = SERVO_TIMEBASE_PERIOD,
-        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
-    };
-    ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timer));
+   // go low on compare threshold
+   ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
+      gen_motor_a,
+      MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor_a_comp, MCPWM_GEN_ACTION_LOW))
+   );
+   //ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
+   //   gen_motor_b,
+   //   MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor_b_comp, MCPWM_GEN_ACTION_LOW))
+   //);
 
-    mcpwm_oper_handle_t oper = NULL;
-    mcpwm_operator_config_t operator_config = {
-        .group_id = 0, // operator must be in the same group to the timer
-    };
-    ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &oper));
-
-    ESP_LOGI(TAG, "Connect timer and operator");
-    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(oper, timer));
-
-    ESP_LOGI(TAG, "Create comparator and generator from the operator");
-    //mcpwm_cmpr_handle_t comparator = NULL;
-    mcpwm_comparator_config_t comparator_config = {
-        .flags.update_cmp_on_tez = true,
-    };
-    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &comparator));
-
-    mcpwm_gen_handle_t generator = NULL;
-    mcpwm_generator_config_t generator_config = {
-        .gen_gpio_num = SERVO_PULSE_GPIO,
-    };
-    ESP_ERROR_CHECK(mcpwm_new_generator(oper, &generator_config, &generator));
-
-    // set the initial compare value, so that the servo will spin to the center position
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparator, 0));
-
-    ESP_LOGI(TAG, "Set generator action on timer and compare event");
-    // go high on counter empty
-    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(generator,
-                                                              MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
-    // go low on compare threshold
-    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(generator,
-                                                                MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparator, MCPWM_GEN_ACTION_LOW)));
-
-    ESP_LOGI(TAG, "Enable and start timer");
-    ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
-    ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
-
-
-    ESP_ERROR_CHECK(i2c_master_init());
-    ESP_LOGI(TAG, "I2C initialized successfully");
-
-    ESP_ERROR_CHECK(mpu9250_register_write_byte(MPU6050_PWR_MGMT_1_REG_ADDR, 0));
-
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    ESP_ERROR_CHECK(example_connect());
-
-    xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(100), pdTRUE, (void *) 0, timer_expired); 
-    
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
-
-    xTimerStart(xTimer, 0);
+   // Enable 
+   ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
+   ESP_ERROR_CHECK(mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP));
+   
+   // Setup I2C
+   ESP_ERROR_CHECK(i2c_master_init()); 
+   ESP_ERROR_CHECK(mpu9250_register_write_byte(MPU6050_PWR_MGMT_1_REG_ADDR, 0));
+  
+   // Init Socket
+   ESP_ERROR_CHECK(nvs_flash_init());
+   ESP_ERROR_CHECK(esp_netif_init());
+   ESP_ERROR_CHECK(esp_event_loop_create_default());
+   
+   /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
+    * Read "Establishing Wi-Fi or Ethernet Connection" section in
+    * examples/protocols/README.md for more information about this function.
+    */
+   ESP_ERROR_CHECK(example_connect());
+   
+   xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(100), pdTRUE, (void *) 0, timer_expired); 
+   
+   xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
+   
+   xTimerStart(xTimer, 0);
 }
