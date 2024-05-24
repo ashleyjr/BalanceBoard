@@ -25,6 +25,7 @@
 
 #include "driver/i2c.h"
 #include "driver/mcpwm_prelude.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "main";
 
@@ -61,11 +62,15 @@ static const char *TAG = "main";
 #define MPU6050_GYRO_ZOUT_L         0x48
 #define NUM_REGS                    14
 
-#define MOTOR_A_PWM_GPIO            32        // GPIO connects to the PWM signal line
-#define MOTOR_B_PWM_GPIO            33        // GPIO connects to the PWM signal line
+#define GPIO_LED                    13
+#define GPIO_MOTOR_STBY             27
+#define GPIO_MOTOR_AIN1             14
+#define GPIO_MOTOR_AIN2             12
+#define GPIO_MOTOR_A_PWM            32
+#define GPIO_MOTOR_B_PWM            33
 
 #define PWM_RESOLUTION_HZ           1000000  // 1MHz, 1us per tick
-#define PWM_PERIOD                  255      // 20000 ticks, 20ms
+#define PWM_PERIOD                  255      // 255 ticks, 255us
 
 #define CMD_SAMPLE_ACCEL_X          0 
 #define CMD_SAMPLE_ACCEL_Y          1 
@@ -73,7 +78,6 @@ static const char *TAG = "main";
 #define CMD_SAMPLE_GYRO_X           3 
 #define CMD_SAMPLE_GYRO_Y           4 
 #define CMD_SAMPLE_GYRO_Z           5 
-
 
 struct Sensor {
    int16_t accel_x;   
@@ -86,6 +90,7 @@ struct Sensor {
 
 struct Config {
    uint8_t menu;
+   bool    led;
    bool    motor_stby;
    bool    motor_a_dir; 
    uint8_t motor_a_pwm; 
@@ -312,7 +317,23 @@ static void timer_expired(TimerHandle_t xTimer){
          sizeof(c),
          0 
       );
+      ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)c.led));
+      ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)c.motor_stby));
       
+      // Encode direction or stop
+      if(c.motor_a_pwm == 0){
+         ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
+         ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
+      }else{
+         if(c.motor_a_dir){
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 1));
+         }else{
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 1));
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
+         }
+      }
+       
       ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, c.motor_a_pwm));
       //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, c.motor_b_pwm));
 
@@ -323,11 +344,28 @@ void app_main(void){
    TimerHandle_t xTimer;
    buf_config = xMessageBufferCreate(sizeof(struct Config) * 2);
    buf_sensor = xMessageBufferCreate(sizeof(struct Sensor) * 2);   
+  
+   // Create all output GPIOs
+   gpio_config_t io_conf = {};
+   io_conf.intr_type = GPIO_INTR_DISABLE; 
+   io_conf.mode = GPIO_MODE_OUTPUT;
+   io_conf.pin_bit_mask = 
+      ((uint64_t)1 << GPIO_LED)|
+      ((uint64_t)1 << GPIO_MOTOR_STBY)|
+      ((uint64_t)1 << GPIO_MOTOR_AIN1)|
+      ((uint64_t)1 << GPIO_MOTOR_AIN2); 
+   io_conf.pull_down_en = 0; 
+   io_conf.pull_up_en = 1;
+   gpio_config(&io_conf);
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
    
    // Create timer 
    mcpwm_timer_handle_t timer = NULL;
    mcpwm_timer_config_t timer_config = {
-       .group_id = 0,
+       .group_id        = 0,
        .clk_src         = MCPWM_TIMER_CLK_SRC_DEFAULT,
        .resolution_hz   = PWM_RESOLUTION_HZ,
        .period_ticks    = PWM_PERIOD,
@@ -353,14 +391,14 @@ void app_main(void){
    // Assign GPIO for motor A
    mcpwm_gen_handle_t gen_motor_a = NULL;
    mcpwm_generator_config_t gen_motor_a_config = {
-       .gen_gpio_num = MOTOR_A_PWM_GPIO,
+       .gen_gpio_num = GPIO_MOTOR_A_PWM,
    };
    ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_a_config, &gen_motor_a));
   
    // Assign GPIO for motor B
    //mcpwm_gen_handle_t gen_motor_b = NULL;
    //mcpwm_generator_config_t gen_motor_b_config = {
-   //    .gen_gpio_num = MOTOR_B_PWM_GPIO,
+   //    .gen_gpio_num = GPIO_MOTOR_B_PWM,
    //};
    //ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_b_config, &gen_motor_b));
 

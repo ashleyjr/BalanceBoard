@@ -26,9 +26,9 @@ def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm):
     sendFrame(b)
 
 if __name__ =="__main__":
-    for i in range(5):
-        setMotor(True, True, 0, True, 0)
-        time.sleep(0.5)
-        setMotor(True, True, 255, True, 0)
-        time.sleep(0.5)
+    for i in range(256):
+        setMotor(False, True, i, True, 0)
+        time.sleep(0.01)
+    setMotor(False, True, 255, True, 0)
+
 
