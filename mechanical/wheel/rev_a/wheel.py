@@ -9,16 +9,16 @@ import Draft
 LEN_AXLE    = 5
 LEN_HUB     = 5
 LEN_RIM     = 5
-LEN_SPOKE   = 2
+LEN_SPOKE   = 1
 
-WID_SPOKE   = 2
+WID_SPOKE   = 1
 
-RAD_AXLE    = 0.5
+RAD_AXLE    = 0.8
 RAD_HUB     = 2
-RAD_RIM_IN  = 10
-RAD_RIM_OUT = 12
+RAD_RIM_IN  = 12
+RAD_RIM_OUT = 16
 
-NUM_SPOKES  = 9
+NUM_SPOKES  = 5
 
 # Name
 name = "wheel"
