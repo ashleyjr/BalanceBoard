@@ -27,57 +27,14 @@
 #include "driver/mcpwm_prelude.h"
 #include "driver/gpio.h"
 
+#include "../common/balance_board.h"
+
 static const char *TAG = "main";
 
 #define PORT                        CONFIG_EXAMPLE_PORT
 #define KEEPALIVE_IDLE              CONFIG_EXAMPLE_KEEPALIVE_IDLE
 #define KEEPALIVE_INTERVAL          CONFIG_EXAMPLE_KEEPALIVE_INTERVAL
 #define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
-
-#define MAX_SIZE                    8
-
-#define I2C_MASTER_SCL_IO           25          /*!< GPIO number used for I2C master clock */
-#define I2C_MASTER_SDA_IO           26          /*!< GPIO number used for I2C master data  */
-#define I2C_MASTER_NUM              0           /*!< I2C master i2c port number, the number of i2c peripheral interfaces available will depend on the chip */
-#define I2C_MASTER_FREQ_HZ          400000      /*!< I2C master clock frequency */
-#define I2C_MASTER_TX_BUF_DISABLE   0           /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_RX_BUF_DISABLE   0           /*!< I2C master doesn't need buffer */
-#define I2C_MASTER_TIMEOUT_MS       1000
-#define MPU6050_SENSOR_ADDR         0x68        /*!< Slave address of the MPU9250 sensor */
-#define MPU6050_PWR_MGMT_1_REG_ADDR 0x6B        /*!< Register addresses of the power managment register */
-#define MPU6050_RESET_BIT           7
-#define MPU6050_ACCEL_XOUT_H        0x3B
-#define MPU6050_ACCEL_XOUT_L        0x3C
-#define MPU6050_ACCEL_YOUT_H        0x3D
-#define MPU6050_ACCEL_YOUT_L        0x3E
-#define MPU6050_ACCEL_ZOUT_H        0x3F
-#define MPU6050_ACCEL_ZOUT_L        0x40
-#define MPU6050_TEMP_OUT_H          0x41
-#define MPU6050_TEMP_OUT_L          0x42
-#define MPU6050_GYRO_XOUT_H         0x43
-#define MPU6050_GYRO_XOUT_L         0x44
-#define MPU6050_GYRO_YOUT_H         0x45
-#define MPU6050_GYRO_YOUT_L         0x46
-#define MPU6050_GYRO_ZOUT_H         0x47
-#define MPU6050_GYRO_ZOUT_L         0x48
-#define NUM_REGS                    14
-
-#define GPIO_LED                    13
-#define GPIO_MOTOR_STBY             27
-#define GPIO_MOTOR_AIN1             14
-#define GPIO_MOTOR_AIN2             12
-#define GPIO_MOTOR_A_PWM            32
-#define GPIO_MOTOR_B_PWM            33
-
-#define PWM_RESOLUTION_HZ           1000000  // 1MHz, 1us per tick
-#define PWM_PERIOD                  255      // 255 ticks, 255us
-
-#define CMD_SAMPLE_ACCEL_X          0 
-#define CMD_SAMPLE_ACCEL_Y          1 
-#define CMD_SAMPLE_ACCEL_Z          2 
-#define CMD_SAMPLE_GYRO_X           3 
-#define CMD_SAMPLE_GYRO_Y           4 
-#define CMD_SAMPLE_GYRO_Z           5 
 
 struct Sensor {
    int16_t accel_x;   
