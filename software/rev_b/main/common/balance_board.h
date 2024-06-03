@@ -34,13 +34,15 @@
 #define GPIO_MOTOR_AIN1                14
 #define GPIO_MOTOR_AIN2                12
 #define GPIO_MOTOR_A_PWM               32
+#define GPIO_MOTOR_BIN1                16
+#define GPIO_MOTOR_BIN2                17
 #define GPIO_MOTOR_B_PWM               33
 
 // 1MHz, 1us per tick
 #define PWM_RESOLUTION_HZ              1000000
 #define PWM_PERIOD                     255    
 
-#define CMD_SAMPLE_ACCEL_Y             0
+#define CMD_SAMPLE_ACCEL_X             0
 #define CMD_SAMPLE_ACCEL_Y             1 
 #define CMD_SAMPLE_ACCEL_Z             2 
 #define CMD_SAMPLE_GYRO_X              3 

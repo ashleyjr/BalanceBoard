@@ -4,7 +4,6 @@ from tools.hdr2const import hdr2Const
 
 HOST = "192.168.1.153"
 PORT = 3333
-
 c = hdr2Const("../common/balance_board.h")
 
 
@@ -30,9 +29,13 @@ def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm):
     sendFrame(b)
 
 if __name__ =="__main__":
-    for i in range(1):
-        setMotor(False, True, i, True, 0)
-        time.sleep(0.01)
-    setMotor(False, True, 255, True, 0)
 
+
+    setMotor(True, True, 128, True, 0)
+    time.sleep(0.5)
+    setMotor(False, False, 0, True, 0)
+    time.sleep(0.1)
+    setMotor(True, False, 128, True, 0)
+    time.sleep(0.5)
+    setMotor(False, True, 0, True, 0)
 

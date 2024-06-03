@@ -274,10 +274,12 @@ static void timer_expired(TimerHandle_t xTimer){
          sizeof(c),
          0 
       );
+      
+      // Standard Outputs
       ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)c.led));
       ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)c.motor_stby));
       
-      // Encode direction or stop
+      // Encode direction or stop based on pwm setting
       if(c.motor_a_pwm == 0){
          ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
          ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
@@ -289,8 +291,21 @@ static void timer_expired(TimerHandle_t xTimer){
             ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 1));
             ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
          }
+      } 
+      if(c.motor_b_pwm == 0){
+         ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN1, 0));
+         ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN2, 0));
+      }else{
+         if(c.motor_b_dir){
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN1, 0));
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN2, 1));
+         }else{
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN1, 1));
+            ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN2, 0));
+         }
       }
-       
+
+      // Drive PWM outputs
       ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, c.motor_a_pwm));
       //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, c.motor_b_pwm));
 
@@ -310,7 +325,9 @@ void app_main(void){
       ((uint64_t)1 << GPIO_LED)|
       ((uint64_t)1 << GPIO_MOTOR_STBY)|
       ((uint64_t)1 << GPIO_MOTOR_AIN1)|
-      ((uint64_t)1 << GPIO_MOTOR_AIN2); 
+      ((uint64_t)1 << GPIO_MOTOR_AIN2)|
+      ((uint64_t)1 << GPIO_MOTOR_BIN1)|
+      ((uint64_t)1 << GPIO_MOTOR_BIN2); 
    io_conf.pull_down_en = 0; 
    io_conf.pull_up_en = 1;
    gpio_config(&io_conf);
@@ -318,6 +335,8 @@ void app_main(void){
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, 0));
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN1, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN2, 0));
    
    // Create timer 
    mcpwm_timer_handle_t timer = NULL;
