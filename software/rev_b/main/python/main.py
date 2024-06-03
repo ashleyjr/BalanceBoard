@@ -17,10 +17,10 @@ def sendFrame(b):
     datas = data_str.split(',')
     print(f"{datas}")
 
-def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm):
+def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm, led=True):
     b = []
     b.append(2)
-    b.append(1)
+    b.append(int(led == True))
     b.append(int(stby  == True))
     b.append(int(a_dir == True))
     b.append(int(a_pwm % 256))
@@ -30,12 +30,14 @@ def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm):
 
 if __name__ =="__main__":
 
+    setMotor(True, True, 50, True, 50)
+    time.sleep(0.5)
+    setMotor(False, True, 255, True, 255)
 
-    setMotor(True, True, 128, True, 0)
-    time.sleep(0.5)
-    setMotor(False, False, 0, True, 0)
-    time.sleep(0.1)
-    setMotor(True, False, 128, True, 0)
-    time.sleep(0.5)
-    setMotor(False, True, 0, True, 0)
+
+    #setMotor(True, True, 255, True, 0)
+    #time.sleep(0.1)
+    #setMotor(True, False, 0, False, 255)
+    #time.sleep(0.5)
+    #setMotor(False, True, 0, True, 0)
 

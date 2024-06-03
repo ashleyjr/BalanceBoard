@@ -121,7 +121,8 @@ static void do_retransmit(const int sock){
       } else {
          // Push the config to the timer process  
          if(pdFALSE == xMessageBufferIsFull(buf_config)){
-            c.menu        = (uint8_t)str[1];
+            c.menu        = (uint8_t)str[0];
+            c.led         = (uint8_t)str[1];
             c.motor_stby  = (bool)(uint8_t)str[2];
             c.motor_a_dir = (bool)(uint8_t)str[3]; 
             c.motor_a_pwm = (uint8_t)str[4]; 
@@ -144,7 +145,7 @@ static void do_retransmit(const int sock){
             );
          }  
          // Use the first char as the comand
-         switch((uint8_t)str[0]){
+         switch(c.menu){
             case CMD_SAMPLE_ACCEL_X: sprintf(str, "%d", s.accel_x); break;
             case CMD_SAMPLE_ACCEL_Y: sprintf(str, "%d", s.accel_y); break;
             case CMD_SAMPLE_ACCEL_Z: sprintf(str, "%d", s.accel_z); break;
@@ -307,8 +308,7 @@ static void timer_expired(TimerHandle_t xTimer){
 
       // Drive PWM outputs
       ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, c.motor_a_pwm));
-      //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, c.motor_b_pwm));
-
+      ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, c.motor_b_pwm));
    }
 }
 
@@ -362,7 +362,7 @@ void app_main(void){
        .flags.update_cmp_on_tez = true,
    };
    ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &motor_a_comp));
-   //ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &motor_b_comp));
+   ESP_ERROR_CHECK(mcpwm_new_comparator(oper, &comparator_config, &motor_b_comp));
    
    // Assign GPIO for motor A
    mcpwm_gen_handle_t gen_motor_a = NULL;
@@ -372,35 +372,35 @@ void app_main(void){
    ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_a_config, &gen_motor_a));
   
    // Assign GPIO for motor B
-   //mcpwm_gen_handle_t gen_motor_b = NULL;
-   //mcpwm_generator_config_t gen_motor_b_config = {
-   //    .gen_gpio_num = GPIO_MOTOR_B_PWM,
-   //};
-   //ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_b_config, &gen_motor_b));
+   mcpwm_gen_handle_t gen_motor_b = NULL;
+   mcpwm_generator_config_t gen_motor_b_config = {
+       .gen_gpio_num = GPIO_MOTOR_B_PWM,
+   };
+   ESP_ERROR_CHECK(mcpwm_new_generator(oper, &gen_motor_b_config, &gen_motor_b));
 
    // set the initial compare value, so that the servo will spin to the center position
    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, 0));
-   //ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, 0));
+   ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, 0));
    
    // go high on counter empty
    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
       gen_motor_a,
       MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH))
    );
-   //ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
-   //   gen_motor_b,
-   //   MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH))
-   //);
+   ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
+      gen_motor_b,
+      MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH))
+   );
 
    // go low on compare threshold
    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
       gen_motor_a,
       MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor_a_comp, MCPWM_GEN_ACTION_LOW))
    );
-   //ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
-   //   gen_motor_b,
-   //   MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor_b_comp, MCPWM_GEN_ACTION_LOW))
-   //);
+   ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
+      gen_motor_b,
+      MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor_b_comp, MCPWM_GEN_ACTION_LOW))
+   );
 
    // Enable 
    ESP_ERROR_CHECK(mcpwm_timer_enable(timer));
