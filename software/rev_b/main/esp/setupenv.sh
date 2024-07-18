@@ -1,1 +1,1 @@
- . $HOME/esp/esp-idf/export.sh  
+ . $HOME/work/esp-idf/export.sh  

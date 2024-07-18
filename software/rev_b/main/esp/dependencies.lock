@@ -3,13 +3,13 @@ dependencies:
     component_hash: null
     source:
       type: idf
-    version: 5.2.1
+    version: 5.4.0
   protocol_examples_common:
     component_hash: null
     source:
-      path: /home/ashleyjr/esp/esp-idf/examples/common_components/protocol_examples_common
+      path: /home/ashley/work/esp-idf/examples/common_components/protocol_examples_common
       type: local
     version: '*'
-manifest_hash: 99bdc1ab282a14ca0eb85f115949bc2b997ef3d575611a5693ec34986a2ae32f
+manifest_hash: e087b417b308df10e4aa379778d423e612f9c0baf3fcff4688e31d9dd2d69907
 target: esp32
 version: 1.0.0
