@@ -37,12 +37,13 @@ static const char *TAG = "main";
 #define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
 
 struct Sensor {
-   int16_t accel_x;   
-   int16_t accel_y;   
-   int16_t accel_z;    
-   int16_t gyro_x;   
-   int16_t gyro_y;   
-   int16_t gyro_z;   
+   uint32_t time;
+   int16_t  accel_x;   
+   int16_t  accel_y;   
+   int16_t  accel_z;    
+   int16_t  gyro_x;   
+   int16_t  gyro_y;   
+   int16_t  gyro_z;   
 }; 
 
 struct Config {
@@ -54,6 +55,8 @@ struct Config {
    bool    motor_b_dir; 
    uint8_t motor_b_pwm; 
 }; 
+
+uint32_t sample_time;
 
 mcpwm_cmpr_handle_t motor_a_comp;
 mcpwm_cmpr_handle_t motor_b_comp;
@@ -109,7 +112,7 @@ static void do_retransmit(const int sock){
    int len;
    char str[MAX_SIZE]; 
    struct Sensor s;
-   struct Config c;
+   struct Config c; 
 
    // Handle socket 
    do {
@@ -119,41 +122,40 @@ static void do_retransmit(const int sock){
       } else if (len == 0) {
          ESP_LOGW(TAG, "Connection closed");
       } else {
-         // Push the config to the timer process  
-         if(pdFALSE == xMessageBufferIsFull(buf_config)){
-            c.menu        = (uint8_t)str[0];
-            c.led         = (uint8_t)str[1];
-            c.motor_stby  = (bool)(uint8_t)str[2];
-            c.motor_a_dir = (bool)(uint8_t)str[3]; 
-            c.motor_a_pwm = (uint8_t)str[4]; 
-            c.motor_b_dir = (bool)(uint8_t)str[5]; 
-            c.motor_b_pwm = (uint8_t)str[6]; 
-            xMessageBufferSend( 
-               buf_config,
-               &c,
-               sizeof(c),
-               0 
-            );
-         }
-         // Get the current sensor output from the timer process
-         if(pdFALSE == xMessageBufferIsEmpty(buf_sensor)){
-            xMessageBufferReceive( 
-               buf_sensor,
-               &s,
-               sizeof(s),
-               0 
-            );
-         }  
+         // Push the config to the timer process when the buffer is empty 
+         c.menu        = (uint8_t)str[0];
+         c.led         = (uint8_t)str[1];
+         c.motor_stby  = (bool)(uint8_t)str[2];
+         c.motor_a_dir = (bool)(uint8_t)str[3]; 
+         c.motor_a_pwm = (uint8_t)str[4]; 
+         c.motor_b_dir = (bool)(uint8_t)str[5]; 
+         c.motor_b_pwm = (uint8_t)str[6]; 
+         while(pdFALSE == xMessageBufferIsEmpty(buf_config)); 
+         xMessageBufferSend( 
+            buf_config,
+            &c,
+            sizeof(c),
+            0 
+         );
+          
+         // Get the current sensor output from the timer process 
+         while(pdTRUE == xMessageBufferIsEmpty(buf_sensor));
+         xMessageBufferReceive( 
+            buf_sensor,
+            &s,
+            sizeof(s),
+            0 
+         );
+
          // Use the first char as the comand
-         switch(c.menu){
-            case CMD_SAMPLE_ACCEL_X: sprintf(str, "%d", s.accel_x); break;
-            case CMD_SAMPLE_ACCEL_Y: sprintf(str, "%d", s.accel_y); break;
-            case CMD_SAMPLE_ACCEL_Z: sprintf(str, "%d", s.accel_z); break;
-            case CMD_SAMPLE_GYRO_X:  sprintf(str, "%d", s.gyro_x);  break;
-            case CMD_SAMPLE_GYRO_Y:  sprintf(str, "%d", s.gyro_y);  break;
-            case CMD_SAMPLE_GYRO_Z:  sprintf(str, "%d", s.gyro_z);  break;
-         }
-                  
+         snprintf(str, sizeof(str), "%ld", s.time);
+         if(c.menu & CMD_SAMPLE_ACCEL_X)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_x);
+         if(c.menu & CMD_SAMPLE_ACCEL_Y)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_y);
+         if(c.menu & CMD_SAMPLE_ACCEL_Z)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_z);
+         if(c.menu & CMD_SAMPLE_GYRO_X)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_x);
+         if(c.menu & CMD_SAMPLE_GYRO_Y)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_y);
+         if(c.menu & CMD_SAMPLE_GYRO_Z)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_z);
+         
          // Return the data
          send(sock, str, strlen(str), 0);
       }
@@ -250,6 +252,7 @@ static void timer_expired(TimerHandle_t xTimer){
 
    ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
 
+   s.time    = sample_time;
    s.accel_x = (raw_data[0] << 8)  | raw_data[1];
    s.accel_y = (raw_data[2] << 8)  | raw_data[3];
    s.accel_z = (raw_data[4] << 8)  | raw_data[5];
@@ -257,8 +260,10 @@ static void timer_expired(TimerHandle_t xTimer){
    s.gyro_y  = (raw_data[8] << 8)  | raw_data[9];
    s.gyro_z  = (raw_data[10] << 8) | raw_data[11];
       
+   sample_time += SAMPLE_MS;
+
    // Place sample in buffer if it's empty
-   if(pdFALSE == xMessageBufferIsFull(buf_sensor)){
+   if(pdTRUE == xMessageBufferIsEmpty(buf_sensor)){
       xMessageBufferSend( 
          buf_sensor,
          &s,
@@ -421,7 +426,8 @@ void app_main(void){
     */
    ESP_ERROR_CHECK(example_connect());
    
-   xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(100), pdTRUE, (void *) 0, timer_expired); 
+   sample_time = 0;
+   xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(SAMPLE_MS), pdTRUE, (void *) 0, timer_expired); 
    
    xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
    

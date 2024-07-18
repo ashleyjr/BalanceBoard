@@ -1,43 +1,52 @@
-import socket
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib import style
+import threading
 import time
-from tools.hdr2const import hdr2Const
+from BalanceBoard import BalanceBoard
 
-HOST = "192.168.1.153"
-PORT = 3333
-c = hdr2Const("../common/balance_board.h")
+style.use('fivethirtyeight')
+fig = plt.figure()
+ax1 = fig.add_subplot(2,1,1)
+ax2 = fig.add_subplot(2,1,2)
 
+time = []
+accel_x = []
+accel_y = []
+accel_z = []
+gyro_x = []
+gyro_y = []
+gyro_z = []
 
-def sendFrame(b):
-    assert(len(b) == 7)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((HOST, PORT))
-        s.sendall(bytes(chr(b[0])+chr(b[1])+chr(b[2])+chr(b[3])+chr(b[4])+chr(b[5])+chr(b[6]), encoding='utf-8'))
-        data = s.recv(1024)
-    data_str = data.decode("utf-8")
-    datas = data_str.split(',')
-    print(f"{datas}")
+def get_data(b):
+    while(True):
+        b.sampleImu()
+        time.append(b.getTime())
+        accel_x.append(b.getAccelX())
+        accel_y.append(b.getAccelY())
+        accel_z.append(b.getAccelZ())
+        gyro_x.append(b.getGyroX())
+        gyro_y.append(b.getGyroY())
+        gyro_z.append(b.getGyroZ())
 
-def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm, led=True):
-    b = []
-    b.append(2)
-    b.append(int(led == True))
-    b.append(int(stby  == True))
-    b.append(int(a_dir == True))
-    b.append(int(a_pwm % 256))
-    b.append(int(b_dir == True))
-    b.append(int(b_pwm % 256))
-    sendFrame(b)
+def animate(time):
+    ax1.clear()
+    ax1.plot(time, accel_x)
+    ax1.plot(time, accel_y)
+    ax1.plot(time, accel_z)
+    ax2.clear()
+    ax2.plot(time, gyro_x)
+    ax2.plot(time, gyro_y)
+    ax2.plot(time, gyro_z)
 
 if __name__ =="__main__":
+    b = BalanceBoard("192.168.1.184", 3333)
+    t = threading.Thread(target=get_data, args=(b,))
+    t.start()
+    ani = animation.FuncAnimation(fig, animate, interval=100)
+    plt.show()
+    time.sleep(1)
+    t.join()
 
-    setMotor(True, True, 50, True, 50)
-    time.sleep(0.5)
-    setMotor(False, True, 255, True, 255)
 
-
-    #setMotor(True, True, 255, True, 0)
-    #time.sleep(0.1)
-    #setMotor(True, False, 0, False, 255)
-    #time.sleep(0.5)
-    #setMotor(False, True, 0, True, 0)
 

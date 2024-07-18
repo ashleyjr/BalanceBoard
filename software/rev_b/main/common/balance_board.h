@@ -1,7 +1,8 @@
 #ifndef INC_BALANCE_BOARD_H
 #define INC_BALANCE_BOARD_H
 
-#define MAX_SIZE                       8
+#define MAX_SIZE                       64
+#define SAMPLE_MS                      100
 
 #define I2C_MASTER_SCL_IO              25     
 #define I2C_MASTER_SDA_IO              26     
@@ -42,11 +43,13 @@
 #define PWM_RESOLUTION_HZ              1000000
 #define PWM_PERIOD                     255    
 
-#define CMD_SAMPLE_ACCEL_X             0
-#define CMD_SAMPLE_ACCEL_Y             1 
-#define CMD_SAMPLE_ACCEL_Z             2 
-#define CMD_SAMPLE_GYRO_X              3 
-#define CMD_SAMPLE_GYRO_Y              4 
-#define CMD_SAMPLE_GYRO_Z              5 
+#define CMD_UPDATE_MOTOR               0x01
+#define CMD_SAMPLE_ACCEL_X             0x02
+#define CMD_SAMPLE_ACCEL_Y             0x04
+#define CMD_SAMPLE_ACCEL_Z             0x08
+#define CMD_SAMPLE_GYRO_X              0x10
+#define CMD_SAMPLE_GYRO_Y              0x20
+#define CMD_SAMPLE_GYRO_Z              0x40
+
 
 #endif
