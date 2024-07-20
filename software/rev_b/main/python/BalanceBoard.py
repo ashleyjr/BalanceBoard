@@ -19,17 +19,17 @@ class BalanceBoard:
         datas = data_str.split(',')
         return datas
 
-    def setMotor(stby, a_dir, a_pwm, b_dir, b_pwm, led=True):
+    def setMotor(self, stby, a_dir, a_pwm, b_dir, b_pwm, led=True):
         b = []
-        b.append(2)
+        b.append(0)
         b.append(int(led == True))
         b.append(int(stby  == True))
         b.append(int(a_dir == True))
-        b.append(int(a_pwm % 256))
+        b.append(int(a_pwm))
         b.append(int(b_dir == True))
-        b.append(int(b_pwm % 256))
-        self.sendFrame(b)
-
+        b.append(int(b_pwm))
+        d = self.sendFrame(b)
+        print(d)
 
     def sampleImu(self):
         b = [0] * 7

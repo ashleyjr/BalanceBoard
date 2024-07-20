@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import style
+import time
 import threading
 from BalanceBoard import BalanceBoard
 
@@ -39,8 +40,12 @@ def animate(time):
 
 if __name__ =="__main__":
     b = BalanceBoard("192.168.1.184", 3333)
-    ani = animation.FuncAnimation(fig, animate, interval=100)
-    plt.show()
+    b.setMotor(False,False,200,True,255)
+    time.sleep(1)
+    b.setMotor(True,False,200,True,255)
+
+    #ani = animation.FuncAnimation(fig, animate, interval=100)
+    #plt.show()
 
 
 

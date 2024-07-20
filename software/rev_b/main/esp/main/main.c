@@ -281,9 +281,11 @@ static void timer_expired(TimerHandle_t xTimer){
          0 
       );
       
+      ESP_LOGI(TAG, "motor_a_pwm %d", c.motor_a_pwm);
+
       // Standard Outputs
       ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)c.led));
-      ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)c.motor_stby));
+      //ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)c.motor_stby));
       
       // Encode direction or stop based on pwm setting
       if(c.motor_a_pwm == 0){
@@ -337,7 +339,7 @@ void app_main(void){
    io_conf.pull_up_en = 1;
    gpio_config(&io_conf);
    ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, 0));
-   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, 0));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, 1));
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN1, 0));
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_AIN2, 0));
    ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_BIN1, 0));
