@@ -10,10 +10,10 @@ class BalanceBoard:
         self.time = -1
 
     def sendFrame(self, b):
-        assert(len(b) == 7)
+        assert(len(b) == 9)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((self.ip, self.port))
-            s.sendall(bytes(chr(b[0])+chr(b[1])+chr(b[2])+chr(b[3])+chr(b[4])+chr(b[5])+chr(b[6]), encoding='utf-8'))
+            s.sendall(bytes(chr(b[0])+chr(b[1])+chr(b[2])+chr(b[3])+chr(b[4])+chr(b[5])+chr(b[6])+chr(b[8])+chr(b[8]), encoding='utf-8'))
             data = s.recv(1024)
         data_str = data.decode("utf-8")
         datas = data_str.split(',')
@@ -32,9 +32,11 @@ class BalanceBoard:
         print(d)
 
     def sampleImu(self):
-        b = [0] * 7
-        b[0] = 0x7E
+        b = [0] * 9
+        b[0] = 0x80
+        b[8] = 1
         d = self.sendFrame(b)
+        print(d)
         self.time = int(d[0])
         self.accel_x = int(d[1])
         self.accel_y = int(d[2])
@@ -42,6 +44,23 @@ class BalanceBoard:
         self.gyro_x = int(d[4])
         self.gyro_y = int(d[5])
         self.gyro_z = int(d[6])
+
+    def setPid(self, p_mul, p_div):
+        b = [0] * 9
+        b[0] = 2
+        b[7] = p_mul
+        b[8] = p_div
+        d = self.sendFrame(b)
+
+    def ledOn(self):
+        b = [0] * 7
+        b[1] = 1
+        d = self.sendFrame(b)
+
+    def ledOff(self):
+        b = [0] * 7
+        b[1] = 0
+        d = self.sendFrame(b)
 
     def getTimeMs(self):
         return self.time

@@ -30,17 +30,17 @@
 #define MPU6050_GYRO_ZOUT_L            0x48
 #define NUM_REGS                       14
 
-#define GPIO_LED                       13
-#define GPIO_MOTOR_STBY                27
-#define GPIO_MOTOR_AIN1                14
-#define GPIO_MOTOR_AIN2                12
-#define GPIO_MOTOR_A_PWM               32
-#define GPIO_MOTOR_BIN1                16
-#define GPIO_MOTOR_BIN2                17
-#define GPIO_MOTOR_B_PWM               33
+#define GPIO_LED                       22
+#define GPIO_MOTOR_STBY                21
+#define GPIO_MOTOR_AIN1                19
+#define GPIO_MOTOR_AIN2                18
+#define GPIO_MOTOR_A_PWM               5
+#define GPIO_MOTOR_BIN1                17
+#define GPIO_MOTOR_BIN2                16
+#define GPIO_MOTOR_B_PWM               4
 
 // 1MHz, 1us per tick
-#define PWM_RESOLUTION_HZ              1000000
+#define PWM_RESOLUTION                 10000000
 #define PWM_PERIOD                     255    
 
 #define CMD_UPDATE_MOTOR               0x01
@@ -50,6 +50,8 @@
 #define CMD_SAMPLE_GYRO_X              0x10
 #define CMD_SAMPLE_GYRO_Y              0x20
 #define CMD_SAMPLE_GYRO_Z              0x40
+#define CMD_SAMPLE_MOTOR_A             0x80
+
 
 
 #endif
