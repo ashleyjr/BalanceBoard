@@ -51,14 +51,16 @@ struct Sensor {
 }; 
 
 struct Config {
-   uint8_t menu;
-   bool    led;
-   bool    motor_stby;
-   bool    motor_a_dir; 
-   uint8_t motor_a_pwm; 
-   bool    motor_b_dir; 
-   uint8_t motor_b_pwm;
-   float   p; 
+   uint32_t menu;
+   bool     led;
+   bool     motor_stby;
+   bool     motor_a_dir; 
+   uint8_t  motor_a_pwm; 
+   bool     motor_b_dir; 
+   uint8_t  motor_b_pwm;
+   float    p;
+   float    i;
+   float    d;
 }; 
 
 uint32_t sample_time;
@@ -69,7 +71,7 @@ mcpwm_cmpr_handle_t motor_b_comp;
 MessageBufferHandle_t buf_sensor;
 MessageBufferHandle_t buf_config;
 
-struct Config proc_conf;
+struct Config conf;
 
 static esp_err_t mpu9250_register_read(uint8_t reg_addr, uint8_t *data, size_t len)
 {
@@ -115,35 +117,66 @@ static esp_err_t i2c_master_init(void)
 
     return i2c_driver_install(i2c_master_port, conf.mode, I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
 }
+
+uint32_t int_from_rx(char *str){
+   uint32_t data;
+   uint8_t i,j;
+   data = 0;
+   for(i=0;i<8;i++){
+      j = *(str+i) - 48;
+      if(j > 9){
+         j -= 7;
+      }
+      data <<= 4;
+      data |= j;
+   }
+   return data; 
+}
+
 static void do_retransmit(const int sock){ 
    int      len;
-   char     str[MAX_SIZE]; 
+   char     data[MAX_SIZE];   
    struct   Sensor s;
    struct   Config c; 
-   int8_t   p_mul;
-   int8_t   p_div;
+   uint32_t rx_data;
 
    // Handle socket 
    do {
-      len = recv(sock, str, sizeof(str) - 1, 0);
+      len = recv(sock, data, sizeof(data) - 1, 0);
       if (len < 0) {
          ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
       } else if (len == 0) {
          ESP_LOGW(TAG, "Connection closed");
-      } else {
-         // Push the config to the timer process when the buffer is empty 
-         c.menu        = (uint8_t)str[0];
-         c.led         = (uint8_t)str[1];
-         c.motor_stby  = (bool)(uint8_t)str[2];
-         c.motor_a_dir = (bool)(uint8_t)str[3]; 
-         c.motor_a_pwm = (uint8_t)str[4]; 
-         c.motor_b_dir = (bool)(uint8_t)str[5]; 
-         c.motor_b_pwm = (uint8_t)str[6]; 
-         
-         p_mul = (uint8_t)str[7];
-         p_div = (uint8_t)str[8];
-         c.p = (float)p_mul / (float)p_div;
-
+      } else { 
+         ESP_LOGI(TAG, "%s", data);
+     
+         // First 8 nibbles is the menu code 
+         // Second 8 nibbles is the data
+         c = conf;
+         c.menu = int_from_rx(&data[0]);
+         rx_data = int_from_rx(&data[8]);
+         switch(c.menu & CMD_MASK_UPDATE){
+            case CMD_UPDATE_LED:          c.led = (0 != rx_data); 
+                                          break;
+            case CMD_UPDATE_MOTOR_STBY:   c.motor_stby = (0 != rx_data); 
+                                          break;
+            case CMD_UPDATE_MOTOR_A_DIR:  c.motor_a_dir = (0 != rx_data); 
+                                          break;
+            case CMD_UPDATE_MOTOR_A_PWM:  c.motor_a_pwm = (uint8_t)rx_data; 
+                                          break;
+            case CMD_UPDATE_MOTOR_B_DIR:  c.motor_b_dir = (0 != rx_data); 
+                                          break;
+            case CMD_UPDATE_MOTOR_B_PWM:  c.motor_b_pwm = (uint8_t)rx_data; 
+                                          break;
+            case CMD_UPDATE_P_CTRL:       c.p = ((float)rx_data)/FLOAT_SCALE; 
+                                          break;
+            case CMD_UPDATE_I_CTRL:       c.i = ((float)rx_data)/FLOAT_SCALE; 
+                                          break;
+            case CMD_UPDATE_D_CTRL:       c.d = ((float)rx_data)/FLOAT_SCALE; 
+                                          break;
+            default:;
+         }
+     
          // Send over config and wait for it to be updated
          while(pdFALSE == xMessageBufferIsEmpty(buf_config)); 
          xMessageBufferSend( 
@@ -153,19 +186,7 @@ static void do_retransmit(const int sock){
             0 
          );
          while(pdFALSE == xMessageBufferIsEmpty(buf_config)); 
-
-         // Get setting from config variable once applied
-         ESP_LOGI(TAG, "proc_conf:");
-         ESP_LOGI(TAG, "          menu=%d", proc_conf.menu);
-         ESP_LOGI(TAG, "          led=%d", proc_conf.led);
-         ESP_LOGI(TAG, "          motor_stby=%d", proc_conf.motor_stby);
-         ESP_LOGI(TAG, "          motor_a_dir=%d", proc_conf.motor_a_dir);
-         ESP_LOGI(TAG, "          motor_a_pwm=%d", proc_conf.motor_a_pwm);
-         ESP_LOGI(TAG, "          motor_b_dir=%d", proc_conf.motor_b_dir);
-         ESP_LOGI(TAG, "          motor_b_pwm=%d", proc_conf.motor_b_pwm);
-         ESP_LOGI(TAG, "          p=%f", proc_conf.p);
-         
-          
+        
          // Get the current sensor output from the timer process 
          while(pdTRUE == xMessageBufferIsEmpty(buf_sensor));
          xMessageBufferReceive( 
@@ -175,18 +196,27 @@ static void do_retransmit(const int sock){
             0 
          );
 
-         // Use the first char as the comand
-         snprintf(str, sizeof(str), "%ld", s.time);
-         if(c.menu & CMD_SAMPLE_ACCEL_X)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_x);
-         if(c.menu & CMD_SAMPLE_ACCEL_Y)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_y);
-         if(c.menu & CMD_SAMPLE_ACCEL_Z)  snprintf(&str[strlen(str)], sizeof(str), ",%d", s.accel_z);
-         if(c.menu & CMD_SAMPLE_GYRO_X)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_x);
-         if(c.menu & CMD_SAMPLE_GYRO_Y)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_y);
-         if(c.menu & CMD_SAMPLE_GYRO_Z)   snprintf(&str[strlen(str)], sizeof(str), ",%d", s.gyro_z);
-         if(c.menu & CMD_SAMPLE_MOTOR_A)  snprintf(&str[strlen(str)], sizeof(str), ",%d, %d", s.motor_a_dir, s.motor_a_pwm);
+         // Time is always and anything else is based on the same command
+         snprintf(&data[strlen(data)], sizeof(data), "%ld", s.time);
+         if(c.menu & CMD_SAMPLE_ACCEL_X)  snprintf(&data[strlen(data)], sizeof(data), ",%d", s.accel_x);
+         if(c.menu & CMD_SAMPLE_ACCEL_Y)  snprintf(&data[strlen(data)], sizeof(data), ",%d", s.accel_y);
+         if(c.menu & CMD_SAMPLE_ACCEL_Z)  snprintf(&data[strlen(data)], sizeof(data), ",%d", s.accel_z);
+         if(c.menu & CMD_SAMPLE_GYRO_X)   snprintf(&data[strlen(data)], sizeof(data), ",%d", s.gyro_x);
+         if(c.menu & CMD_SAMPLE_GYRO_Y)   snprintf(&data[strlen(data)], sizeof(data), ",%d", s.gyro_y);
+         if(c.menu & CMD_SAMPLE_GYRO_Z)   snprintf(&data[strlen(data)], sizeof(data), ",%d", s.gyro_z);
+         if(c.menu & CMD_SAMPLE_MOTOR_A)  snprintf(&data[strlen(data)], sizeof(data), ",%d, %d", s.motor_a_dir, s.motor_a_pwm);
          
          // Return the data
-         send(sock, str, strlen(str), 0);
+         send(sock, data, strlen(data), 0);
+         
+         // Print the debug
+         ESP_LOGI(TAG, "Config Update (menu=0x%lx)", conf.menu);
+         ESP_LOGI(TAG, "");
+         ESP_LOGI(TAG, "   led = %d", conf.led);
+         ESP_LOGI(TAG, "   p   = %f", conf.p);
+         ESP_LOGI(TAG, "   i   = %f", conf.i);
+         ESP_LOGI(TAG, "   d   = %f", conf.d);
+
       }
    } while (len > 0);
 }
@@ -302,40 +332,40 @@ static void timer_expired(TimerHandle_t xTimer){
    if(pdFALSE == xMessageBufferIsEmpty(buf_config)){
       xMessageBufferReceive( 
          buf_config,
-         &proc_conf,
-         sizeof(proc_conf),
+         &conf,
+         sizeof(conf),
          0 
       );
    } 
    
    // Menu of proces options
-   switch(proc_conf.menu){ 
-      case 1:  motor_a_dir = proc_conf.motor_a_dir;
-               motor_a_pwm = proc_conf.motor_a_pwm;
-               motor_b_dir = proc_conf.motor_b_dir;
-               motor_a_pwm = proc_conf.motor_a_pwm;
-               break;
-      case 2:  drive =  s.gyro_y * proc_conf.p;
-               if(drive >= 0){
-                  motor_a_dir = true;
-                  motor_a_pwm = (uint8_t)drive;
-               }else{
-                  motor_b_dir = false;
-                  motor_b_pwm = (uint8_t)(drive * -1);
-               }
-               motor_b_dir = false;
-               motor_b_pwm = 0;
-               break;
-      default: motor_a_dir = false;
-               motor_a_pwm = 0;
-               motor_b_dir = false;
-               motor_b_pwm = 0;
-               break;
+   switch(conf.menu & CMD_MASK_CTRL){ 
+      case CMD_CTRL_MANUAL:   motor_a_dir = conf.motor_a_dir;
+                              motor_a_pwm = conf.motor_a_pwm;
+                              motor_b_dir = conf.motor_b_dir;
+                              motor_a_pwm = conf.motor_a_pwm;
+                              break;
+      case CMD_CTRL_AUTO:     drive =  s.gyro_y * conf.p;
+                              if(drive >= 0){
+                                 motor_a_dir = true;
+                                 motor_a_pwm = (uint8_t)drive;
+                              }else{
+                                 motor_b_dir = false;
+                                 motor_b_pwm = (uint8_t)(drive * -1);
+                              }
+                              motor_b_dir = false;
+                              motor_b_pwm = 0;
+                              break;
+      default:                motor_a_dir = false;
+                              motor_a_pwm = 0;
+                              motor_b_dir = false;
+                              motor_b_pwm = 0;
+                              break;
    }
     
    // Standard Outputs
-   ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)proc_conf.led));
-   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)proc_conf.motor_stby));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)conf.led));
+   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)conf.motor_stby));
    
    // Encode direction or stop based on pwm setting
    if(motor_a_pwm == 0){
@@ -494,7 +524,7 @@ void app_main(void){
     */
    ESP_ERROR_CHECK(example_connect());
    
-   proc_conf.menu = 0;
+   conf.menu = 0;
    sample_time = 0;
    
    xTimer = xTimerCreate("Timer", pdMS_TO_TICKS(SAMPLE_MS), pdTRUE, (void *) 0, timer_expired); 

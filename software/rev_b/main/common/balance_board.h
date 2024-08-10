@@ -1,7 +1,7 @@
 #ifndef INC_BALANCE_BOARD_H
 #define INC_BALANCE_BOARD_H
 
-#define MAX_SIZE                       64
+#define MAX_SIZE                       128
 #define SAMPLE_MS                      100
 
 #define I2C_MASTER_SCL_IO              25     
@@ -43,15 +43,37 @@
 #define PWM_RESOLUTION                 10000000
 #define PWM_PERIOD                     255    
 
-#define CMD_UPDATE_MOTOR               0x01
-#define CMD_SAMPLE_ACCEL_X             0x02
-#define CMD_SAMPLE_ACCEL_Y             0x04
-#define CMD_SAMPLE_ACCEL_Z             0x08
-#define CMD_SAMPLE_GYRO_X              0x10
-#define CMD_SAMPLE_GYRO_Y              0x20
-#define CMD_SAMPLE_GYRO_Z              0x40
-#define CMD_SAMPLE_MOTOR_A             0x80
+// For scaling between uint32_t and float
+#define FLOAT_SCALE                    100
 
+// Bits [15:0] used for samples
+#define CMD_SAMPLE_ACCEL_X             0x00000001
+#define CMD_SAMPLE_ACCEL_Y             0x00000002
+#define CMD_SAMPLE_ACCEL_Z             0x00000004
+#define CMD_SAMPLE_GYRO_X              0x00000008
+#define CMD_SAMPLE_GYRO_Y              0x00000010
+#define CMD_SAMPLE_GYRO_Z              0x00000020
+#define CMD_SAMPLE_MOTOR_A             0x00000040
+#define CMD_SAMPLE_MOTOR_B             0x00000080
 
+// Bits [23:16] used for updates
+#define CMD_UPDATE_MOTOR_STBY          0x00010000
+#define CMD_UPDATE_MOTOR_A_DIR         0x00020000
+#define CMD_UPDATE_MOTOR_A_PWM         0x00030000
+#define CMD_UPDATE_MOTOR_B_DIR         0x00040000
+#define CMD_UPDATE_MOTOR_B_PWM         0x00050000
+#define CMD_UPDATE_LED                 0x00060000
+#define CMD_UPDATE_P_CTRL              0x00100000
+#define CMD_UPDATE_I_CTRL              0x00200000
+#define CMD_UPDATE_D_CTRL              0x00300000
+
+// Bits [31:24] used for control loop
+#define CMD_CTRL_MANUAL                0x01000000
+#define CMD_CTRL_AUTO                  0x02000000
+
+// Masks
+#define CMD_MASK_SAMPLE                0x0000FFFF
+#define CMD_MASK_UPDATE                0x00FF0000
+#define CMD_MASK_CTRL                  0xFF000000
 
 #endif

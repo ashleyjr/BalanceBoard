@@ -18,6 +18,9 @@ gyro_x = []
 gyro_y = []
 gyro_z = []
 
+
+b = BalanceBoard("192.168.1.184", 3333, "../common/balance_board.h")
+
 def animate(time):
     # Sample and pack data
     b.sampleImu()
@@ -39,9 +42,28 @@ def animate(time):
     #ax1.plot(sample_time, gyro_z)
 
 if __name__ =="__main__":
-    b = BalanceBoard("192.168.1.184", 3333)
-    b.setPid(0,256)
-    b.sampleImu()
+
+    b.activateMotor()
+    for i in range(10):
+        b.setMotorA(0, 100)
+        time.sleep(1)
+        b.setMotorA(1, 100)
+    b.deactivateMotor()
+
+
+    #b = BalanceBoard("192.168.1.184", 3333, "../common/balance_board.h")
+
+    #for i in range(10):
+    #    b.sampleImu()
+
+    #b.onLED()
+    #time.sleep(1)
+    #b.offLED()
+
+    #b.setPID(1,30,3)
+
+    #b.setPid(0,256)
+    #b.sampleImu()
     #b.ledOn()
 
     #for i in range(0,30):

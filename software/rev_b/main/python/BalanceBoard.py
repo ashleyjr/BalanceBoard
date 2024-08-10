@@ -4,39 +4,70 @@ from tools.hdr2const import hdr2Const
 
 class BalanceBoard:
 
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, const_filepath):
         self.port = port
         self.ip = ip
         self.time = -1
+        self.c = hdr2Const(const_filepath)
 
-    def sendFrame(self, b):
-        assert(len(b) == 9)
+    def __sendFrame(self, data):
+        assert(len(data) < self.c.MAX_SIZE)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((self.ip, self.port))
-            s.sendall(bytes(chr(b[0])+chr(b[1])+chr(b[2])+chr(b[3])+chr(b[4])+chr(b[5])+chr(b[6])+chr(b[8])+chr(b[8]), encoding='utf-8'))
-            data = s.recv(1024)
-        data_str = data.decode("utf-8")
-        datas = data_str.split(',')
-        return datas
+            s.sendall(str(data+'\0').encode())
+            reply = s.recv(self.c.MAX_SIZE).decode("utf-8")
+        # Check the replay
+        if(reply[0:len(data)] != data):
+            print("ERROR")
+            print(f"Expected: {data}")
+            print(f"Recieved: {bounce}")
+        return reply[len(data):]
 
-    def setMotor(self, stby, a_dir, a_pwm, b_dir, b_pwm, led=True):
-        b = []
-        b.append(0)
-        b.append(int(led == True))
-        b.append(int(stby  == True))
-        b.append(int(a_dir == True))
-        b.append(int(a_pwm))
-        b.append(int(b_dir == True))
-        b.append(int(b_pwm))
-        d = self.sendFrame(b)
-        print(d)
+    def __sendCmdData(self, cmd, data):
+        s = f"{cmd:0>8X}{data:0>8X}"
+        return self.__sendFrame(s)
+
+    def onLED(self):
+        self.__sendCmdData(self.c.CMD_UPDATE_LED,1)
+
+    def offLED(self):
+        self.__sendCmdData(self.c.CMD_UPDATE_LED,0)
+
+    def setPID(self, p, i, d):
+        self.__sendCmdData(self.c.CMD_UPDATE_P_CTRL, int(p * float(self.c.FLOAT_SCALE)))
+        self.__sendCmdData(self.c.CMD_UPDATE_I_CTRL, int(i * float(self.c.FLOAT_SCALE)))
+        self.__sendCmdData(self.c.CMD_UPDATE_D_CTRL, int(d * float(self.c.FLOAT_SCALE)))
+
+    def deactivateMotor(self):
+        cmd = self.c.CMD_CTRL_MANUAL
+        cmd |= self.c.CMD_UPDATE_MOTOR_STBY
+        self.__sendCmdData(cmd,0)
+
+    def activateMotor(self):
+        cmd = self.c.CMD_CTRL_MANUAL
+        cmd |= self.c.CMD_UPDATE_MOTOR_STBY
+        self.__sendCmdData(cmd,1)
+
+    def setMotorA(self, d, p):
+
+        # TODO: Chaneg to make 0 around 2^31
+
+        cmd = self.c.CMD_CTRL_MANUAL
+        cmd |= self.c.CMD_UPDATE_MOTOR_A_DIR
+        self.__sendCmdData(cmd,d)
+        cmd = self.c.CMD_CTRL_MANUAL
+        cmd |= self.c.CMD_UPDATE_MOTOR_A_PWM
+        self.__sendCmdData(cmd,p)
 
     def sampleImu(self):
-        b = [0] * 9
-        b[0] = 0x80
-        b[8] = 1
-        d = self.sendFrame(b)
-        print(d)
+        cmd  = self.c.CMD_SAMPLE_ACCEL_X
+        cmd |= self.c.CMD_SAMPLE_ACCEL_Y
+        cmd |= self.c.CMD_SAMPLE_ACCEL_Z
+        cmd |= self.c.CMD_SAMPLE_GYRO_X
+        cmd |= self.c.CMD_SAMPLE_GYRO_Y
+        cmd |= self.c.CMD_SAMPLE_GYRO_Z
+        d = self.__sendCmdData(cmd,0)
+        d = d.split(',')
         self.time = int(d[0])
         self.accel_x = int(d[1])
         self.accel_y = int(d[2])
@@ -44,23 +75,6 @@ class BalanceBoard:
         self.gyro_x = int(d[4])
         self.gyro_y = int(d[5])
         self.gyro_z = int(d[6])
-
-    def setPid(self, p_mul, p_div):
-        b = [0] * 9
-        b[0] = 2
-        b[7] = p_mul
-        b[8] = p_div
-        d = self.sendFrame(b)
-
-    def ledOn(self):
-        b = [0] * 7
-        b[1] = 1
-        d = self.sendFrame(b)
-
-    def ledOff(self):
-        b = [0] * 7
-        b[1] = 0
-        d = self.sendFrame(b)
 
     def getTimeMs(self):
         return self.time
