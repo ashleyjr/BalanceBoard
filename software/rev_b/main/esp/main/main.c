@@ -29,41 +29,12 @@
 
 #include "../common/balance_board.h"
 
+#define PORT                           CONFIG_EXAMPLE_PORT
+#define KEEPALIVE_IDLE                 CONFIG_EXAMPLE_KEEPALIVE_IDLE
+#define KEEPALIVE_INTERVAL             CONFIG_EXAMPLE_KEEPALIVE_INTERVAL
+#define KEEPALIVE_COUNT                CONFIG_EXAMPLE_KEEPALIVE_COUNT
+
 static const char *TAG = "main";
-
-#define PORT                        CONFIG_EXAMPLE_PORT
-#define KEEPALIVE_IDLE              CONFIG_EXAMPLE_KEEPALIVE_IDLE
-#define KEEPALIVE_INTERVAL          CONFIG_EXAMPLE_KEEPALIVE_INTERVAL
-#define KEEPALIVE_COUNT             CONFIG_EXAMPLE_KEEPALIVE_COUNT
-
-struct Sensor {
-   uint32_t time;
-   int16_t  accel_x;   
-   int16_t  accel_y;   
-   int16_t  accel_z;    
-   int16_t  gyro_x;   
-   int16_t  gyro_y;   
-   int16_t  gyro_z;  
-   uint8_t  motor_a_dir;
-   uint8_t  motor_a_pwm;
-   uint8_t  motor_b_dir;
-   uint8_t  motor_b_pwm;
-}; 
-
-struct Config {
-   uint32_t menu;
-   bool     led;
-   bool     motor_stby;
-   bool     motor_a_dir; 
-   uint8_t  motor_a_pwm; 
-   bool     motor_b_dir; 
-   uint8_t  motor_b_pwm;
-   float    p;
-   float    i;
-   float    d;
-}; 
-
-uint32_t sample_time;
 
 mcpwm_cmpr_handle_t motor_a_comp;
 mcpwm_cmpr_handle_t motor_b_comp;
@@ -71,7 +42,10 @@ mcpwm_cmpr_handle_t motor_b_comp;
 MessageBufferHandle_t buf_sensor;
 MessageBufferHandle_t buf_config;
 
+uint32_t sample_time;
 struct Config conf;
+float err_n0;
+float area;
 
 static esp_err_t mpu9250_register_read(uint8_t reg_addr, uint8_t *data, size_t len)
 {
@@ -174,6 +148,9 @@ static void do_retransmit(const int sock){
                                           break;
             case CMD_UPDATE_D_CTRL:       c.d = ((float)rx_data)/FLOAT_SCALE; 
                                           break;
+            case CMD_UPDATE_TARGET:       c.target = ((float)rx_data)/FLOAT_SCALE; 
+                                          break;
+
             default:;
          }
      
@@ -205,17 +182,29 @@ static void do_retransmit(const int sock){
          if(c.menu & CMD_SAMPLE_GYRO_Y)   snprintf(&data[strlen(data)], sizeof(data), ",%d", s.gyro_y);
          if(c.menu & CMD_SAMPLE_GYRO_Z)   snprintf(&data[strlen(data)], sizeof(data), ",%d", s.gyro_z);
          if(c.menu & CMD_SAMPLE_MOTOR_A)  snprintf(&data[strlen(data)], sizeof(data), ",%d, %d", s.motor_a_dir, s.motor_a_pwm);
-         
+         if(c.menu & CMD_SAMPLE_MOTOR_B)  snprintf(&data[strlen(data)], sizeof(data), ",%d, %d", s.motor_b_dir, s.motor_b_pwm);
+         if(c.menu & CMD_SAMPLE_P_DRIVE)  snprintf(&data[strlen(data)], sizeof(data), ",%f", s.p_drive);
+         if(c.menu & CMD_SAMPLE_I_DRIVE)  snprintf(&data[strlen(data)], sizeof(data), ",%f", s.i_drive);
+         if(c.menu & CMD_SAMPLE_D_DRIVE)  snprintf(&data[strlen(data)], sizeof(data), ",%f", s.d_drive);
+         if(c.menu & CMD_SAMPLE_ERROR)    snprintf(&data[strlen(data)], sizeof(data), ",%f", s.error);
+
+
          // Return the data
          send(sock, data, strlen(data), 0);
          
          // Print the debug
          ESP_LOGI(TAG, "Config Update (menu=0x%lx)", conf.menu);
          ESP_LOGI(TAG, "");
-         ESP_LOGI(TAG, "   led = %d", conf.led);
-         ESP_LOGI(TAG, "   p   = %f", conf.p);
-         ESP_LOGI(TAG, "   i   = %f", conf.i);
-         ESP_LOGI(TAG, "   d   = %f", conf.d);
+         ESP_LOGI(TAG, "   target      = %f", conf.target);
+         ESP_LOGI(TAG, "   led         = %d", conf.led);
+         ESP_LOGI(TAG, "   motor_stby  = %d", conf.motor_stby);
+         ESP_LOGI(TAG, "   motor_a_dir = %d", conf.motor_a_dir);
+         ESP_LOGI(TAG, "   motor_a_pwm = %d", conf.motor_a_pwm);
+         ESP_LOGI(TAG, "   motor_b_dir = %d", conf.motor_b_dir);
+         ESP_LOGI(TAG, "   motor_b_pwm = %d", conf.motor_b_pwm);
+         ESP_LOGI(TAG, "   p           = %f", conf.p);
+         ESP_LOGI(TAG, "   i           = %f", conf.i);
+         ESP_LOGI(TAG, "   d           = %f", conf.d);
 
       }
    } while (len > 0);
@@ -307,11 +296,13 @@ CLEAN_UP:
 static void timer_expired(TimerHandle_t xTimer){
    uint8_t  raw_data[NUM_REGS];  
    struct   Sensor s; 
+   float    gradient;
+   float    err_n1;
+   float    drive;
    bool     motor_a_dir = false;
    uint8_t  motor_a_pwm = 0;
    bool     motor_b_dir = false;
    uint8_t  motor_b_pwm = 0;
-   float    drive;
 
    // Read sensor
    ESP_ERROR_CHECK(mpu9250_register_read(MPU6050_ACCEL_XOUT_H, raw_data, NUM_REGS)); 
@@ -344,15 +335,31 @@ static void timer_expired(TimerHandle_t xTimer){
                               motor_a_pwm = conf.motor_a_pwm;
                               motor_b_dir = conf.motor_b_dir;
                               motor_a_pwm = conf.motor_a_pwm;
+                              ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)conf.motor_stby));
                               break;
-      case CMD_CTRL_AUTO:     drive =  s.gyro_y * conf.p;
+      case CMD_CTRL_AUTO:     // Calculate Error
+                              err_n1 = err_n0;
+                              err_n0 = conf.target - (float)s.gyro_y;
+                              // Accumulate Area
+                              area += (err_n0 + err_n1) / 2;
+                              // Calculate Gradient
+                              gradient = err_n0 - err_n1;
+                              // Sum to drive output
+                              s.p_drive = conf.p * err_n0;
+                              s.i_drive = conf.i * area;
+                              s.d_drive = conf.d * gradient;
+                              drive = s.p_drive + s.i_drive + s.d_drive; 
+                              // Capture error
+                              s.error = err_n0;
+                              // Translate to motor driving 
                               if(drive >= 0){
                                  motor_a_dir = true;
                                  motor_a_pwm = (uint8_t)drive;
                               }else{
-                                 motor_b_dir = false;
-                                 motor_b_pwm = (uint8_t)(drive * -1);
+                                 motor_a_dir = false;
+                                 motor_a_pwm = (uint8_t)(drive * -1);
                               }
+                              ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, 1));
                               motor_b_dir = false;
                               motor_b_pwm = 0;
                               break;
@@ -365,7 +372,6 @@ static void timer_expired(TimerHandle_t xTimer){
     
    // Standard Outputs
    ESP_ERROR_CHECK(gpio_set_level(GPIO_LED, (uint8_t)conf.led));
-   ESP_ERROR_CHECK(gpio_set_level(GPIO_MOTOR_STBY, (uint8_t)conf.motor_stby));
    
    // Encode direction or stop based on pwm setting
    if(motor_a_pwm == 0){
@@ -397,7 +403,6 @@ static void timer_expired(TimerHandle_t xTimer){
    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_a_comp, motor_a_pwm));
    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor_b_comp, motor_b_pwm));
   
-
    // Add PWM rate back in to sensor data
    s.motor_a_dir = motor_a_dir;
    s.motor_a_pwm = motor_a_pwm;

@@ -55,6 +55,13 @@
 #define CMD_SAMPLE_GYRO_Z              0x00000020
 #define CMD_SAMPLE_MOTOR_A             0x00000040
 #define CMD_SAMPLE_MOTOR_B             0x00000080
+#define CMD_SAMPLE_P_DRIVE             0x00000100
+#define CMD_SAMPLE_I_DRIVE             0x00000200
+#define CMD_SAMPLE_D_DRIVE             0x00000400
+#define CMD_SAMPLE_ERROR               0x00000800
+
+
+
 
 // Bits [23:16] used for updates
 #define CMD_UPDATE_MOTOR_STBY          0x00010000
@@ -66,6 +73,7 @@
 #define CMD_UPDATE_P_CTRL              0x00100000
 #define CMD_UPDATE_I_CTRL              0x00200000
 #define CMD_UPDATE_D_CTRL              0x00300000
+#define CMD_UPDATE_TARGET              0x00400000
 
 // Bits [31:24] used for control loop
 #define CMD_CTRL_MANUAL                0x01000000
@@ -75,5 +83,37 @@
 #define CMD_MASK_SAMPLE                0x0000FFFF
 #define CMD_MASK_UPDATE                0x00FF0000
 #define CMD_MASK_CTRL                  0xFF000000
+
+struct Sensor {
+   uint32_t time;
+   int16_t  accel_x;   
+   int16_t  accel_y;   
+   int16_t  accel_z;    
+   int16_t  gyro_x;   
+   int16_t  gyro_y;   
+   int16_t  gyro_z; 
+   float    p_drive;
+   float    i_drive;
+   float    d_drive;
+   float    error;
+   uint8_t  motor_a_dir;
+   uint8_t  motor_a_pwm;
+   uint8_t  motor_b_dir;
+   uint8_t  motor_b_pwm;
+}; 
+
+struct Config {
+   uint32_t menu;
+   float    target;
+   bool     led;
+   bool     motor_stby;
+   bool     motor_a_dir; 
+   uint8_t  motor_a_pwm; 
+   bool     motor_b_dir; 
+   uint8_t  motor_b_pwm;
+   float    p;
+   float    i;
+   float    d;
+};
 
 #endif

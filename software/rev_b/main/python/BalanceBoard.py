@@ -38,6 +38,13 @@ class BalanceBoard:
         self.__sendCmdData(self.c.CMD_UPDATE_I_CTRL, int(i * float(self.c.FLOAT_SCALE)))
         self.__sendCmdData(self.c.CMD_UPDATE_D_CTRL, int(d * float(self.c.FLOAT_SCALE)))
 
+    def deactivatePID(self):
+        self.__sendCmdData(0,0)
+
+    def activatePID(self):
+        cmd = self.c.CMD_CTRL_AUTO
+        self.__sendCmdData(cmd,0)
+
     def deactivateMotor(self):
         cmd = self.c.CMD_CTRL_MANUAL
         cmd |= self.c.CMD_UPDATE_MOTOR_STBY
@@ -76,6 +83,23 @@ class BalanceBoard:
         self.gyro_y = int(d[5])
         self.gyro_z = int(d[6])
 
+    def sampleLoopData(self, auto_enable=False):
+        cmd = self.c.CMD_SAMPLE_GYRO_Y
+        cmd |= self.c.CMD_SAMPLE_P_DRIVE
+        cmd |= self.c.CMD_SAMPLE_I_DRIVE
+        cmd |= self.c.CMD_SAMPLE_D_DRIVE
+        cmd |= self.c.CMD_SAMPLE_ERROR
+        if auto_enable:
+            cmd |= self.c.CMD_CTRL_AUTO
+        d = self.__sendCmdData(cmd,0)
+        d = d.split(',')
+        self.time = int(d[0])
+        self.gyro_y = int(d[1])
+        self.p_drive = float(d[2])
+        self.i_drive = float(d[3])
+        self.d_drive = float(d[4])
+        self.error = float(d[5])
+
     def getTimeMs(self):
         return self.time
 
@@ -102,6 +126,23 @@ class BalanceBoard:
 
     def getGyroZ(self):
         return self.gyro_z
+
+    def getPdrive(self):
+        return self.p_drive
+
+    def getIdrive(self):
+        return self.i_drive
+
+    def getDdrive(self):
+        return self.d_drive
+
+    def getError(self):
+        return self.error
+
+
+
+
+
 
 
 
